@@ -134,6 +134,8 @@ class WebRTCService:
 
     def _advertise_host(self, sdp: str, request_host: str) -> str:
         host = self._public_host or request_host
+        if host.lower() == "localhost":
+            host = "127.0.0.1"
         if not re.fullmatch(r"[A-Za-z0-9._:-]+", host):
             raise ValueError("WebRTC public host contains invalid characters")
 

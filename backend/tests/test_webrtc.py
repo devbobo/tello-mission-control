@@ -84,13 +84,22 @@ async def test_webrtc_answer_starts_video_and_closes_peers(
 async def test_video_track_encodes_drone_frames():
     class FrameSource:
         def get_frame(self):
-            return np.full((2, 3, 3), 127, dtype=np.uint8)
+            return np.array(
+                [[[0, 0, 255], [255, 0, 0]]],
+                dtype=np.uint8,
+            )
 
     track = TelloVideoTrack(FrameSource(), fps=30)
     frame = await track.recv()
-    assert frame.width == 3
-    assert frame.height == 2
-    assert frame.to_ndarray(format="bgr24").tolist() == [
-        [[127, 127, 127]] * 3,
-        [[127, 127, 127]] * 3,
-    ]
+    assert frame.width == 2
+    assert frame.height == 1
+    assert frame.to_ndarray(format="rgb24").tolist() == [[[255, 0, 0], [0, 0, 255]]]
+
+
+def test_webrtc_advertises_loopback_ip_for_localhost_origin():
+    service = WebRTCService(drone_manager=None, fps=30)
+    sdp = "a=candidate:1 1 UDP 123 172.18.0.2 40000 typ host\r\n"
+
+    advertised_sdp = service._advertise_host(sdp, "localhost")
+
+    assert "127.0.0.1 40000 typ host" in advertised_sdp

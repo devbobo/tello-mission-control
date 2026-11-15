@@ -1,5 +1,6 @@
 import asyncio
 
+import numpy as np
 import pytest
 
 from app.models.commands import MoveDirection, RotateDirection
@@ -15,6 +16,15 @@ from app.services.drone_manager import (
 @pytest.fixture
 def dm():
     return DroneManager()
+
+
+def test_get_frame_converts_rgb_frames_to_bgr(dm):
+    class RGBFrameRead:
+        frame = np.array([[[255, 0, 0], [0, 0, 255]]], dtype=np.uint8)
+
+    dm._frame_read = RGBFrameRead()
+
+    assert dm.get_frame().tolist() == [[[0, 0, 255], [255, 0, 0]]]
 
 
 @pytest.mark.asyncio

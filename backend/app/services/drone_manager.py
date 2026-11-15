@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from time import monotonic
 from typing import Any, Callable
 
+import cv2
+
 from app.config import settings
 from app.models.commands import MoveDirection, RotateDirection
 
@@ -496,10 +498,10 @@ class DroneManager:
         return {"ok": True, "message": "Video stream stopped"}
 
     def get_frame(self):
-        """Get the current frame as a numpy array. Non-blocking (reads cached frame)."""
+        """Get the current frame as an OpenCV-compatible BGR array."""
         if not self._frame_read:
             return None
-        return self._frame_read.frame
+        return cv2.cvtColor(self._frame_read.frame, cv2.COLOR_RGB2BGR)
 
     # -- Telemetry (no lock needed — reads cached state) --
 
