@@ -8,6 +8,7 @@ from app.config import settings
 from app.routers import control, flights, sequences, status, telemetry, video
 from app.services.drone_manager import DroneManager
 from app.services.flight_log_service import FlightLogService
+from app.services.visual_odometry_service import VisualOdometryService
 from app.services.telemetry_service import TelemetryService
 from app.services.vision_service import VisionService
 from app.services.yolo_detector import YoloOnnxDetector
@@ -41,6 +42,10 @@ async def lifespan(app: FastAPI):
         model_path=settings.vision_model_path,
         device=vision_detector.device if vision_detector else settings.vision_device,
     )
+    odometry_service = VisualOdometryService(
+        dm,
+        poll_hz=settings.vision_odometry_hz,
+    )
     webrtc_service = WebRTCService(
         dm,
         settings.video_fps,
@@ -55,9 +60,11 @@ async def lifespan(app: FastAPI):
     app.state.webrtc_service = webrtc_service
     app.state.telemetry_service = ts
     app.state.vision_service = vision_service
+    app.state.odometry_service = odometry_service
     app.state.flight_log_service = flight_log_service
     await ts.start()
     await vision_service.start()
+    await odometry_service.start()
     logger.info("Backend ready. Mock mode: %s", settings.use_mock_drone)
 
     yield
@@ -65,6 +72,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down...")
     await ts.stop()
+    await odometry_service.stop()
     await vision_service.stop()
     await webrtc_service.close_all()
     await dm.shutdown()

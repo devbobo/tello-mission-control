@@ -5,15 +5,18 @@ import CommandLog from '@/components/CommandLog';
 import FlightControls from '@/components/FlightControls';
 import ActionButtons from '@/components/ActionButtons';
 import SequenceModal from '@/components/SequenceModal';
+import VisualOdometryMap from '@/components/VisualOdometryMap';
 import { useDroneStore } from '@/stores/droneStore';
 import * as api from '@/lib/api';
 
 export default function HudLayout() {
   const [sequenceModalOpen, setSequenceModalOpen] = useState(false);
   const sendCommand = useDroneStore((s) => s.sendCommand);
+  const previewMode = useDroneStore((s) => s.previewMode);
 
   return (
     <>
+      {!previewMode && <VisualOdometryMap />}
       <div
         className="fixed inset-0 z-[2] grid pointer-events-none"
         style={{

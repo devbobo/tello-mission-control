@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     vision_confidence_threshold: float = Field(default=0.25, ge=0, le=1)
     vision_class_names: list[str] = Field(default_factory=list)
     vision_model_format: Literal["auto", "yolov8", "yolov10"] = "auto"
+    vision_odometry_hz: float = Field(default=5.0, gt=0, le=30)
 
     # Mock mode (for development/testing without a physical drone)
     use_mock_drone: bool = False

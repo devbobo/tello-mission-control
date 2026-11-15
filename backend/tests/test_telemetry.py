@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from app.models.odometry import OdometryData, OdometryMessage
 from app.models.vision import VisionDetection, VisionFrameData, VisionMessage
 from app.routers.telemetry import telemetry_ws
 
@@ -211,6 +212,7 @@ async def test_websocket_serializes_vision_messages():
                 state=SimpleNamespace(
                     telemetry_service=FakeService(),
                     vision_service=FakeService(),
+                    odometry_service=FakeService(),
                     drone_manager=FakeDroneManager(),
                 )
             )
@@ -250,5 +252,22 @@ async def test_websocket_serializes_vision_messages():
     )
 
     await websocket.app.state.vision_service.callback(message)
+    odometry = OdometryMessage(
+        data=OdometryData(
+            frame_id=2,
+            frame_width=960,
+            frame_height=720,
+            position_x=0.01,
+            position_y=-0.02,
+            delta_x=0.01,
+            delta_y=-0.02,
+            tracking_valid=True,
+            tracked_points=18,
+            quality=0.8,
+        ),
+        timestamp="2026-11-15T00:00:00Z",
+    )
+    await websocket.app.state.odometry_service.callback(odometry)
 
     assert json.loads(websocket.sent[0]) == json.loads(message.model_dump_json())
+    assert json.loads(websocket.sent[1]) == json.loads(odometry.model_dump_json())

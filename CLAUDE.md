@@ -110,6 +110,7 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 - **Vision inference** runs only when a detector is provided, operates on copied latest frames off the event loop, and publishes normalized results over the telemetry WebSocket.
 - **Object detection** loads an optional YOLOv8/v10 ONNX model through OpenCV DNN; the frontend overlays fresh normalized detections on the WebRTC video.
 - **Person tracking assist** assigns temporary overlap-based IDs and shows manual centering guidance; it never sends RC commands.
+- **Visual odometry** estimates relative image-space motion with Lucas–Kanade optical flow and displays a minimap trail; it has no metric scale or yaw compensation.
 - **Docker networking**: Uses standard bridge networking. Frontend Nginx proxies to backend via Docker DNS (`http://backend:8000`). For real drone on Linux, add `network_mode: host` to backend service.
 - **No authentication** in v1 — the app runs on the Tello's isolated Wi-Fi network.
 - **CORS**: Backend allows `http://localhost:3000` and `http://localhost:5173`.
@@ -121,7 +122,7 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 - REST: `POST /api/video/webrtc/offer`, `DELETE /api/video/webrtc/{peer_id}`, `POST /api/video/stream/{start,stop}`, `POST /api/video/snapshot`
 - REST: `GET /api/status` — `{ connected, flying, streaming, battery }`
 - REST: `GET /api/sequences` — stub, returns `[]`
-- WebSocket: `WS /api/ws/telemetry` — pushes telemetry frames (~4Hz), command logs, and timestamped normalized vision results when a detector is configured
+- WebSocket: `WS /api/ws/telemetry` — pushes telemetry frames (~4Hz), command logs, timestamped vision results when a detector is configured, and relative visual-odometry estimates
 
 ### Not yet implemented
 - `POST /api/control/{flip,rc}` (P1)

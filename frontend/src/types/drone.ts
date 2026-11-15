@@ -125,8 +125,27 @@ export interface VisionFrame {
   timestamp: string;
 }
 
+export interface OdometryData {
+  frame_id: number;
+  frame_width: number;
+  frame_height: number;
+  position_x: number;
+  position_y: number;
+  delta_x: number;
+  delta_y: number;
+  tracking_valid: boolean;
+  tracked_points: number;
+  quality: number;
+}
+
+export interface OdometryFrame {
+  data: OdometryData;
+  timestamp: string;
+}
+
 export type WsMessage =
   | { type: 'telemetry'; data: TelemetryData; timestamp: string }
   | { type: 'vision'; data: VisionFrameData; timestamp: string }
+  | { type: 'odometry'; data: OdometryData; timestamp: string }
   | { type: 'command_log'; data: CommandLogEntry }
   | { type: 'sequence_progress'; data: SequenceProgress };
