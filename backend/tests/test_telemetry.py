@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from app.models.markers import MarkerDetection, MarkerFrameData, MarkerMessage
 from app.models.odometry import OdometryData, OdometryMessage
 from app.models.vision import VisionDetection, VisionFrameData, VisionMessage
 from app.routers.telemetry import telemetry_ws
@@ -213,6 +214,7 @@ async def test_websocket_serializes_vision_messages():
                     telemetry_service=FakeService(),
                     vision_service=FakeService(),
                     odometry_service=FakeService(),
+                    marker_service=FakeService(),
                     drone_manager=FakeDroneManager(),
                 )
             )
@@ -269,5 +271,30 @@ async def test_websocket_serializes_vision_messages():
     )
     await websocket.app.state.odometry_service.callback(odometry)
 
+    marker_message = MarkerMessage(
+        data=MarkerFrameData(
+            frame_id=3,
+            frame_width=960,
+            frame_height=720,
+            inference_ms=8.5,
+            aruco_dictionary="DICT_4X4_50",
+            markers=[
+                MarkerDetection(
+                    marker_type="aruco",
+                    marker_id="7",
+                    x_min=0.2,
+                    y_min=0.2,
+                    x_max=0.8,
+                    y_max=0.8,
+                )
+            ],
+        ),
+        timestamp="2026-11-15T00:00:00Z",
+    )
+    await websocket.app.state.marker_service.callback(marker_message)
+
     assert json.loads(websocket.sent[0]) == json.loads(message.model_dump_json())
     assert json.loads(websocket.sent[1]) == json.loads(odometry.model_dump_json())
+    assert json.loads(websocket.sent[2]) == json.loads(
+        marker_message.model_dump_json()
+    )

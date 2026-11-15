@@ -163,7 +163,7 @@ python -m pytest -v    # 54 tests, all use MockTello (no drone needed)
 | POST | `/api/video/snapshot` | Capture single JPEG frame |
 | GET | `/api/status` | `{connected, flying, streaming, battery}` |
 | GET | `/api/sequences` | List flight sequences (stub) |
-| WS | `/api/ws/telemetry` | Telemetry (~4Hz), command logs, vision detections, and visual odometry |
+| WS | `/api/ws/telemetry` | Telemetry (~4Hz), command logs, vision detections, visual odometry, and marker detections |
 
 ### Allowed Values
 
@@ -219,6 +219,8 @@ Export weights in a separate model-preparation environment with Ultralytics inst
 `TELLO_VISION_DEVICE=auto` uses CUDA only when both the OpenCV DNN build and a CUDA device are available, otherwise it uses CPU. `cpu` and `cuda` can be selected explicitly; CUDA selection fails during startup if unavailable. The built-in OpenCV detector does not support MPS or Edge TPU. CUDA in Docker also requires a CUDA-enabled OpenCV build and GPU access in the container. `TELLO_VISION_INFERENCE_HZ` defaults to `5.0` and is capped at `30`; `TELLO_VISION_CONFIDENCE_THRESHOLD` defaults to `0.25`. The service does not queue frames while inference runs, so it resumes with a fresh frame instead of processing stale video.
 
 Visual odometry runs independently of the object detector using Lucas–Kanade optical flow on downscaled grayscale frames. It integrates robust frame-to-frame motion into a relative image-space trail shown on the minimap; `TELLO_VISION_ODOMETRY_HZ` controls its sampling rate. Because this monocular estimate has no camera calibration, scale recovery, or yaw compensation, its units are not meters and it can drift; it is not full metric SLAM.
+
+QR and ArUco markers are detected independently of YOLO and shown as an overlay. Select a detected marker in **Marker Guidance** to see its direction from frame center; QR payloads and ArUco IDs can be used to distinguish waypoints. This is manual visual guidance only: it does not estimate calibrated distance or send flight commands. `TELLO_VISION_MARKER_HZ` controls the scan rate, and `TELLO_VISION_ARUCO_DICTIONARY` selects the ArUco dictionary.
 
 Person detections receive temporary IDs by matching overlapping boxes between frames. Select a person in the tracking panel to see whether they are left/right or above/below frame center; IDs reset when the backend restarts and may switch if people cross. This is visual guidance only: it never sends RC commands or moves the drone. Keep flight control manual.
 
@@ -304,7 +306,7 @@ A roadmap of where this project could go, roughly ordered from most practical to
 - **Person Tracking Assist** *(visual guidance implemented)* — Assign temporary IDs to detected people and show selected-target position; no flight commands are sent
 - **Follow-Me Autopilot** *(deferred)* — Automatic RC control requires a separate flight-safety design and is not part of person tracking assist
 - **Optical Flow / Visual Odometry** *(relative image-space implemented)* — Display a robust optical-flow trail on a 2D minimap; metric scale recovery and full SLAM remain deferred
-- **QR / ArUco Marker Navigation** — Place markers as waypoints; drone reads them mid-flight to self-correct position
+- **QR / ArUco Marker Guidance** *(visual guidance implemented)* — Identify and manually align to markers; automatic waypoint correction remains deferred
 
 ### Phase 3 — Autonomous Flight
 

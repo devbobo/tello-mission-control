@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     vision_class_names: list[str] = Field(default_factory=list)
     vision_model_format: Literal["auto", "yolov8", "yolov10"] = "auto"
     vision_odometry_hz: float = Field(default=5.0, gt=0, le=30)
+    vision_marker_hz: float = Field(default=5.0, gt=0, le=30)
+    vision_aruco_dictionary: str = "DICT_4X4_50"
 
     # Mock mode (for development/testing without a physical drone)
     use_mock_drone: bool = False

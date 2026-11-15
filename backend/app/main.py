@@ -8,6 +8,7 @@ from app.config import settings
 from app.routers import control, flights, sequences, status, telemetry, video
 from app.services.drone_manager import DroneManager
 from app.services.flight_log_service import FlightLogService
+from app.services.marker_service import MarkerDetectionService
 from app.services.visual_odometry_service import VisualOdometryService
 from app.services.telemetry_service import TelemetryService
 from app.services.vision_service import VisionService
@@ -46,6 +47,11 @@ async def lifespan(app: FastAPI):
         dm,
         poll_hz=settings.vision_odometry_hz,
     )
+    marker_service = MarkerDetectionService(
+        dm,
+        poll_hz=settings.vision_marker_hz,
+        aruco_dictionary=settings.vision_aruco_dictionary,
+    )
     webrtc_service = WebRTCService(
         dm,
         settings.video_fps,
@@ -61,10 +67,12 @@ async def lifespan(app: FastAPI):
     app.state.telemetry_service = ts
     app.state.vision_service = vision_service
     app.state.odometry_service = odometry_service
+    app.state.marker_service = marker_service
     app.state.flight_log_service = flight_log_service
     await ts.start()
     await vision_service.start()
     await odometry_service.start()
+    await marker_service.start()
     logger.info("Backend ready. Mock mode: %s", settings.use_mock_drone)
 
     yield
@@ -72,6 +80,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down...")
     await ts.stop()
+    await marker_service.stop()
     await odometry_service.stop()
     await vision_service.stop()
     await webrtc_service.close_all()

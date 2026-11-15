@@ -4,6 +4,7 @@ import StatusBar from '@/components/StatusBar';
 import CommandLog from '@/components/CommandLog';
 import FlightControls from '@/components/FlightControls';
 import ActionButtons from '@/components/ActionButtons';
+import MarkerNavigationAssist from '@/components/MarkerNavigationAssist';
 import SequenceModal from '@/components/SequenceModal';
 import VisualOdometryMap from '@/components/VisualOdometryMap';
 import { useDroneStore } from '@/stores/droneStore';
@@ -17,6 +18,7 @@ export default function HudLayout() {
   return (
     <>
       {!previewMode && <VisualOdometryMap />}
+      {!previewMode && <MarkerNavigationAssist />}
       <div
         className="fixed inset-0 z-[2] grid pointer-events-none"
         style={{

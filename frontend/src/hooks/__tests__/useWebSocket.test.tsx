@@ -24,6 +24,7 @@ describe('useWebSocket vision messages', () => {
       previewMode: false,
       visionFrame: null,
       odometryFrame: null,
+      markerFrame: null,
     });
   });
 
@@ -97,6 +98,47 @@ describe('useWebSocket vision messages', () => {
     expect(useDroneStore.getState().odometryFrame).toEqual({
       data: odometryMessage.data,
       timestamp: odometryMessage.timestamp,
+    });
+    unmount();
+  });
+
+  it('stores the latest timestamped marker detections', () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    useDroneStore.setState({ connectionStatus: 'connected', previewMode: false });
+    const { unmount } = renderHook(() => useWebSocket());
+    const markerMessage = {
+      type: 'markers',
+      timestamp: '2026-11-15T00:00:00Z',
+      data: {
+        frame_id: 4,
+        frame_width: 640,
+        frame_height: 480,
+        inference_ms: 8,
+        aruco_dictionary: 'DICT_4X4_50',
+        markers: [
+          {
+            marker_type: 'aruco',
+            marker_id: '7',
+            payload: null,
+            payload_truncated: false,
+            x_min: 0.2,
+            y_min: 0.3,
+            x_max: 0.6,
+            y_max: 0.7,
+          },
+        ],
+      },
+    };
+
+    act(() => {
+      MockWebSocket.latest.onmessage?.({
+        data: JSON.stringify(markerMessage),
+      } as MessageEvent);
+    });
+
+    expect(useDroneStore.getState().markerFrame).toEqual({
+      data: markerMessage.data,
+      timestamp: markerMessage.timestamp,
     });
     unmount();
   });

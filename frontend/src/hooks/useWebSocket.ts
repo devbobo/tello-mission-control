@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { useDroneStore } from '@/stores/droneStore';
-import type { OdometryFrame, VisionFrame, WsMessage } from '@/types/drone';
+import type {
+  MarkerFrame,
+  OdometryFrame,
+  VisionFrame,
+  WsMessage,
+} from '@/types/drone';
 
 const MAX_BACKOFF = 16000;
 
@@ -10,6 +15,7 @@ export function useWebSocket() {
   const setTelemetry = useDroneStore((s) => s.setTelemetry);
   const setVisionFrame = useDroneStore((s) => s.setVisionFrame);
   const setOdometryFrame = useDroneStore((s) => s.setOdometryFrame);
+  const setMarkerFrame = useDroneStore((s) => s.setMarkerFrame);
   const addCommandLog = useDroneStore((s) => s.addCommandLog);
   const setSequenceProgress = useDroneStore((s) => s.setSequenceProgress);
   const setIsFlying = useDroneStore((s) => s.setIsFlying);
@@ -70,6 +76,12 @@ export function useWebSocket() {
                 timestamp: msg.timestamp,
               } satisfies OdometryFrame);
               break;
+            case 'markers':
+              setMarkerFrame({
+                data: msg.data,
+                timestamp: msg.timestamp,
+              } satisfies MarkerFrame);
+              break;
             case 'sequence_progress': {
               const progress = msg.data;
               if (progress.status === 'completed' || progress.status === 'cancelled' || progress.status === 'error') {
@@ -121,6 +133,7 @@ export function useWebSocket() {
     setTelemetry,
     setVisionFrame,
     setOdometryFrame,
+    setMarkerFrame,
     addCommandLog,
     setSequenceProgress,
     setIsFlying,

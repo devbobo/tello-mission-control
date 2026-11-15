@@ -143,9 +143,35 @@ export interface OdometryFrame {
   timestamp: string;
 }
 
+export interface MarkerDetection {
+  marker_type: 'qr' | 'aruco';
+  marker_id: string;
+  payload: string | null;
+  payload_truncated: boolean;
+  x_min: number;
+  y_min: number;
+  x_max: number;
+  y_max: number;
+}
+
+export interface MarkerFrameData {
+  frame_id: number;
+  frame_width: number;
+  frame_height: number;
+  inference_ms: number;
+  aruco_dictionary: string;
+  markers: MarkerDetection[];
+}
+
+export interface MarkerFrame {
+  data: MarkerFrameData;
+  timestamp: string;
+}
+
 export type WsMessage =
   | { type: 'telemetry'; data: TelemetryData; timestamp: string }
   | { type: 'vision'; data: VisionFrameData; timestamp: string }
   | { type: 'odometry'; data: OdometryData; timestamp: string }
+  | { type: 'markers'; data: MarkerFrameData; timestamp: string }
   | { type: 'command_log'; data: CommandLogEntry }
   | { type: 'sequence_progress'; data: SequenceProgress };

@@ -3,6 +3,7 @@ import type {
   ApiResponse,
   CommandLogEntry,
   ConnectionStatus,
+  MarkerFrame,
   Sequence,
   SequenceProgress,
   TelemetryData,
@@ -33,6 +34,8 @@ interface DroneStore {
   setVisionFrame: (frame: VisionFrame | null) => void;
   odometryFrame: OdometryFrame | null;
   setOdometryFrame: (frame: OdometryFrame | null) => void;
+  markerFrame: MarkerFrame | null;
+  setMarkerFrame: (frame: MarkerFrame | null) => void;
 
   // Command log
   commandLog: CommandLogEntry[];
@@ -83,6 +86,8 @@ export const useDroneStore = create<DroneStore>((set, get) => ({
   setVisionFrame: (frame) => set({ visionFrame: frame }),
   odometryFrame: null,
   setOdometryFrame: (frame) => set({ odometryFrame: frame }),
+  markerFrame: null,
+  setMarkerFrame: (frame) => set({ markerFrame: frame }),
 
   // Command log
   commandLog: [],
@@ -118,6 +123,7 @@ export const useDroneStore = create<DroneStore>((set, get) => ({
       telemetry: null,
       visionFrame: null,
       odometryFrame: null,
+      markerFrame: null,
       commandLog: [],
       sequenceProgress: null,
     });
@@ -129,6 +135,7 @@ export const useDroneStore = create<DroneStore>((set, get) => ({
       connectionStatus: 'connecting',
       visionFrame: null,
       odometryFrame: null,
+      markerFrame: null,
     });
     try {
       const res = await api.connectDrone();
@@ -174,6 +181,7 @@ export const useDroneStore = create<DroneStore>((set, get) => ({
       telemetry: null,
       visionFrame: null,
       odometryFrame: null,
+      markerFrame: null,
       sequenceProgress: null,
       commandPending: false,
       previewMode: false,

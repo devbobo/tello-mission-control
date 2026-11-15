@@ -3,6 +3,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.models.markers import MarkerMessage
 from app.models.odometry import OdometryMessage
 from app.models.telemetry import TelemetryFrame
 from app.models.vision import VisionMessage
@@ -17,6 +18,7 @@ async def telemetry_ws(websocket: WebSocket):
     telemetry_service = websocket.app.state.telemetry_service
     vision_service = websocket.app.state.vision_service
     odometry_service = websocket.app.state.odometry_service
+    marker_service = websocket.app.state.marker_service
     drone_manager = websocket.app.state.drone_manager
 
     async def send_telemetry(frame: TelemetryFrame):
@@ -31,9 +33,13 @@ async def telemetry_ws(websocket: WebSocket):
     async def send_odometry(message: OdometryMessage):
         await websocket.send_text(message.model_dump_json())
 
+    async def send_markers(message: MarkerMessage):
+        await websocket.send_text(message.model_dump_json())
+
     telemetry_service.subscribe(send_telemetry)
     vision_service.subscribe(send_vision)
     odometry_service.subscribe(send_odometry)
+    marker_service.subscribe(send_markers)
     drone_manager.add_command_log_callback(send_command_log)
 
     try:
@@ -45,4 +51,5 @@ async def telemetry_ws(websocket: WebSocket):
         telemetry_service.unsubscribe(send_telemetry)
         vision_service.unsubscribe(send_vision)
         odometry_service.unsubscribe(send_odometry)
+        marker_service.unsubscribe(send_markers)
         drone_manager.remove_command_log_callback(send_command_log)

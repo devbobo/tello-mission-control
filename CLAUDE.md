@@ -85,10 +85,13 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 │   │   │   ├── drone_manager.py    # Singleton Tello wrapper + asyncio.Lock + MockTello
 │   │   │   ├── telemetry_service.py # Background 4Hz polling + pub-sub broadcasting
 │   │   │   ├── vision_service.py   # Latest-frame, off-loop detector runtime
-│   │   │   └── yolo_detector.py    # YOLOv8/v10 ONNX inference via OpenCV DNN
+│   │   │   ├── yolo_detector.py    # YOLOv8/v10 ONNX inference via OpenCV DNN
+│   │   │   ├── marker_detector.py  # QR and ArUco detection via OpenCV
+│   │   │   └── marker_service.py   # Latest-frame marker broadcasts
 │   │   └── models/
 │   │       ├── commands.py         # Pydantic request/response schemas with validation
-│   │       └── telemetry.py        # Telemetry data models
+│   │       ├── telemetry.py        # Telemetry data models
+│   │       └── markers.py          # QR/ArUco WebSocket schemas
 │   └── tests/                      # pytest (54 tests)
 ├── frontend/                       # React + Vite + TailwindCSS
 │   ├── Dockerfile                  # Multi-stage: Node build → Nginx runtime
@@ -111,6 +114,7 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 - **Object detection** loads an optional YOLOv8/v10 ONNX model through OpenCV DNN; the frontend overlays fresh normalized detections on the WebRTC video.
 - **Person tracking assist** assigns temporary overlap-based IDs and shows manual centering guidance; it never sends RC commands.
 - **Visual odometry** estimates relative image-space motion with Lucas–Kanade optical flow and displays a minimap trail; it has no metric scale or yaw compensation.
+- **Marker guidance** detects QR payloads and ArUco IDs independently of YOLO and offers manual frame-centering guidance; it never sends RC commands or estimates calibrated distance.
 - **Docker networking**: Uses standard bridge networking. Frontend Nginx proxies to backend via Docker DNS (`http://backend:8000`). For real drone on Linux, add `network_mode: host` to backend service.
 - **No authentication** in v1 — the app runs on the Tello's isolated Wi-Fi network.
 - **CORS**: Backend allows `http://localhost:3000` and `http://localhost:5173`.
@@ -122,7 +126,7 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 - REST: `POST /api/video/webrtc/offer`, `DELETE /api/video/webrtc/{peer_id}`, `POST /api/video/stream/{start,stop}`, `POST /api/video/snapshot`
 - REST: `GET /api/status` — `{ connected, flying, streaming, battery }`
 - REST: `GET /api/sequences` — stub, returns `[]`
-- WebSocket: `WS /api/ws/telemetry` — pushes telemetry frames (~4Hz), command logs, timestamped vision results when a detector is configured, and relative visual-odometry estimates
+- WebSocket: `WS /api/ws/telemetry` — pushes telemetry frames (~4Hz), command logs, timestamped vision results when a detector is configured, relative visual-odometry estimates, and QR/ArUco detections
 
 ### Not yet implemented
 - `POST /api/control/{flip,rc}` (P1)
@@ -141,6 +145,8 @@ All prefixed with `TELLO_`. See `.env.template` for the full list with defaults.
 | `TELLO_TELEMETRY_POLL_HZ` | `4.0` | Telemetry polling frequency |
 | `TELLO_VIDEO_FPS` | `30` | Video stream frame rate |
 | `TELLO_VIDEO_JPEG_QUALITY` | `70` | JPEG compression quality (1-100) |
+| `TELLO_VISION_MARKER_HZ` | `5.0` | QR/ArUco marker scan rate (maximum 30 Hz) |
+| `TELLO_VISION_ARUCO_DICTIONARY` | `DICT_4X4_50` | OpenCV ArUco dictionary name |
 | `TELLO_CORS_ORIGINS` | `["http://localhost:3000","http://localhost:5173"]` | Allowed CORS origins |
 
 ## Reference Documents

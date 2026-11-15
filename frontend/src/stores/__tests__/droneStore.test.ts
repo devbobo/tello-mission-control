@@ -20,6 +20,7 @@ describe('droneStore', () => {
       telemetry: null,
       visionFrame: null,
       odometryFrame: null,
+      markerFrame: null,
       commandLog: [],
       sequences: [],
       sequenceProgress: null,
@@ -165,6 +166,7 @@ describe('droneStore', () => {
       expect(state.telemetry).toBeNull();
       expect(state.visionFrame).toBeNull();
       expect(state.odometryFrame).toBeNull();
+      expect(state.markerFrame).toBeNull();
     });
   });
 
@@ -192,6 +194,7 @@ describe('droneStore', () => {
       expect(state.telemetry).toBeNull();
       expect(state.visionFrame).toBeNull();
       expect(state.odometryFrame).toBeNull();
+      expect(state.markerFrame).toBeNull();
       expect(state.sequenceProgress).toBeNull();
     });
 
