@@ -19,6 +19,7 @@ const visionFrame = (timestamp: string) => ({
         y_min: 0.2,
         x_max: 0.5,
         y_max: 0.7,
+        track_id: 7,
       },
     ],
   },
@@ -48,6 +49,19 @@ describe('VisionOverlay', () => {
     expect(overlay.querySelector('rect')).toHaveAttribute('width', '256');
     expect(Number(overlay.querySelector('rect')?.getAttribute('height'))).toBeCloseTo(240);
     expect(screen.getByText('person 90%')).toBeInTheDocument();
+  });
+
+  it('highlights the selected person track', () => {
+    act(() => {
+      useDroneStore.setState({ visionFrame: visionFrame(new Date().toISOString()) });
+    });
+
+    render(<VisionOverlay selectedTrackId={7} />);
+
+    expect(screen.getByRole('img').querySelector('rect')).toHaveAttribute(
+      'stroke',
+      '#38bdf8',
+    );
   });
 
   it('hides results after they become stale', () => {

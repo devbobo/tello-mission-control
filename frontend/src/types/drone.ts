@@ -107,6 +107,7 @@ export interface VisionDetection {
   y_min: number;
   x_max: number;
   y_max: number;
+  track_id?: number | null;
 }
 
 export interface VisionFrameData {

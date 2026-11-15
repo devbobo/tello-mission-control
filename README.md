@@ -218,6 +218,8 @@ Export weights in a separate model-preparation environment with Ultralytics inst
 
 `TELLO_VISION_DEVICE=auto` uses CUDA only when both the OpenCV DNN build and a CUDA device are available, otherwise it uses CPU. `cpu` and `cuda` can be selected explicitly; CUDA selection fails during startup if unavailable. The built-in OpenCV detector does not support MPS or Edge TPU. CUDA in Docker also requires a CUDA-enabled OpenCV build and GPU access in the container. `TELLO_VISION_INFERENCE_HZ` defaults to `5.0` and is capped at `30`; `TELLO_VISION_CONFIDENCE_THRESHOLD` defaults to `0.25`. The service does not queue frames while inference runs, so it resumes with a fresh frame instead of processing stale video.
 
+Person detections receive temporary IDs by matching overlapping boxes between frames. Select a person in the tracking panel to see whether they are left/right or above/below frame center; IDs reset when the backend restarts and may switch if people cross. This is visual guidance only: it never sends RC commands or moves the drone. Keep flight control manual.
+
 ## Gamepad Control
 
 Connect a standard-mapped PS5 or Xbox controller, connect to the drone, and take off. Enable **Gamepad** in the flight controls, then hold **A/Cross (button 0)** as the dead-man control. Releasing it immediately sends neutral input. Only standard-mapped controllers with at least four axes are supported.
@@ -297,7 +299,8 @@ A roadmap of where this project could go, roughly ordered from most practical to
 
 - **Vision Runtime Foundation** *(implemented)* — Add a configurable, latest-frame inference service and normalized WebSocket results
 - **Object Detection Overlay** *(implemented)* — Run configurable YOLOv8/v10 ONNX inference and draw fresh, normalized detections over the video HUD; see [Vision Runtime](#vision-runtime)
-- **Face / Person Tracking** — Detect a target and auto-generate RC commands to keep them centered in frame — "follow me" mode
+- **Person Tracking Assist** *(visual guidance implemented)* — Assign temporary IDs to detected people and show selected-target position; no flight commands are sent
+- **Follow-Me Autopilot** *(deferred)* — Automatic RC control requires a separate flight-safety design and is not part of person tracking assist
 - **Optical Flow & SLAM** — Estimate drone position drift without GPS using visual odometry, display estimated position on a 2D minimap
 - **QR / ArUco Marker Navigation** — Place markers as waypoints; drone reads them mid-flight to self-correct position
 

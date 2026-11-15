@@ -11,6 +11,7 @@ class VisionDetection(BaseModel):
     y_min: float = Field(ge=0, le=1)
     x_max: float = Field(ge=0, le=1)
     y_max: float = Field(ge=0, le=1)
+    track_id: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def validate_bounds(self) -> "VisionDetection":

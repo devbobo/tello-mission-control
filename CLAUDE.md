@@ -109,6 +109,7 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 - **Telemetry via WebSocket push** at ~4 Hz from a background polling task — not client-polled.
 - **Vision inference** runs only when a detector is provided, operates on copied latest frames off the event loop, and publishes normalized results over the telemetry WebSocket.
 - **Object detection** loads an optional YOLOv8/v10 ONNX model through OpenCV DNN; the frontend overlays fresh normalized detections on the WebRTC video.
+- **Person tracking assist** assigns temporary overlap-based IDs and shows manual centering guidance; it never sends RC commands.
 - **Docker networking**: Uses standard bridge networking. Frontend Nginx proxies to backend via Docker DNS (`http://backend:8000`). For real drone on Linux, add `network_mode: host` to backend service.
 - **No authentication** in v1 — the app runs on the Tello's isolated Wi-Fi network.
 - **CORS**: Backend allows `http://localhost:3000` and `http://localhost:5173`.

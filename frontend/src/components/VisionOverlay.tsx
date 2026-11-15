@@ -1,32 +1,14 @@
-import { useEffect, useState } from 'react';
-import { useDroneStore } from '@/stores/droneStore';
-import type { VisionFrame } from '@/types/drone';
+import { useFreshVisionFrame } from '@/hooks/useFreshVisionFrame';
 
-const RESULT_MAX_AGE_MS = 1500;
+interface VisionOverlayProps {
+  selectedTrackId?: number | null;
+}
 
-export default function VisionOverlay() {
-  const visionFrame = useDroneStore((s) => s.visionFrame);
-  const [expiredFrame, setExpiredFrame] = useState<VisionFrame | null>(null);
-
-  useEffect(() => {
-    if (!visionFrame) return;
-
-    const expiresIn =
-      Date.parse(visionFrame.timestamp) + RESULT_MAX_AGE_MS - Date.now();
-    if (!Number.isFinite(expiresIn) || expiresIn <= 0) return;
-
-    const timeout = window.setTimeout(
-      () => setExpiredFrame(visionFrame),
-      expiresIn,
-    );
-    return () => window.clearTimeout(timeout);
-  }, [visionFrame]);
-
-  if (!visionFrame || visionFrame === expiredFrame) return null;
-
-  const expiresIn =
-    Date.parse(visionFrame.timestamp) + RESULT_MAX_AGE_MS - Date.now();
-  if (!Number.isFinite(expiresIn) || expiresIn <= 0) return null;
+export default function VisionOverlay({
+  selectedTrackId = null,
+}: VisionOverlayProps) {
+  const visionFrame = useFreshVisionFrame();
+  if (!visionFrame) return null;
 
   const { frame_width: frameWidth, frame_height: frameHeight, detections } =
     visionFrame.data;
@@ -47,6 +29,7 @@ export default function VisionOverlay() {
         const width = (detection.x_max - detection.x_min) * frameWidth;
         const height = (detection.y_max - detection.y_min) * frameHeight;
         const labelY = Math.max(y - 6, 12);
+        const isSelected = detection.track_id === selectedTrackId;
 
         return (
           <g
@@ -60,8 +43,8 @@ export default function VisionOverlay() {
               height={height}
               rx="2"
               fill="none"
-              stroke="#a3e635"
-              strokeWidth="2"
+              stroke={isSelected ? '#38bdf8' : '#a3e635'}
+              strokeWidth={isSelected ? '3' : '2'}
               vectorEffect="non-scaling-stroke"
             />
             <text

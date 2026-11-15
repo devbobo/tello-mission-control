@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { closeWebRtcPeer, createWebRtcOffer, getWebRtcConfiguration } from '@/lib/api';
 import { useDroneStore } from '@/stores/droneStore';
+import PersonTrackingAssist from '@/components/PersonTrackingAssist';
 import VisionOverlay from '@/components/VisionOverlay';
 
 type FeedState = 'loading' | 'active' | 'error';
@@ -36,10 +37,14 @@ function waitForIceGatheringComplete(peer: RTCPeerConnection): Promise<void> {
 export default function VideoFeed() {
   const previewMode = useDroneStore((s) => s.previewMode);
   const [state, setState] = useState<FeedState>('loading');
+  const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (previewMode) return;
+    if (previewMode) {
+      setSelectedTrackId(null);
+      return;
+    }
 
     let disposed = false;
     let retries = 0;
@@ -173,7 +178,15 @@ export default function VideoFeed() {
         onPlaying={() => setState('active')}
       />
 
-      {state === 'active' && <VisionOverlay />}
+      {state === 'active' && (
+        <>
+          <VisionOverlay selectedTrackId={selectedTrackId} />
+          <PersonTrackingAssist
+            selectedTrackId={selectedTrackId}
+            onSelectTrack={setSelectedTrackId}
+          />
+        </>
+      )}
 
       {state === 'loading' && (
         <div className="fixed inset-0 z-0 flex items-center justify-center bg-black">

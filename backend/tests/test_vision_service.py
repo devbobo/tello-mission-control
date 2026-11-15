@@ -113,6 +113,7 @@ async def test_vision_service_offloads_single_latest_frame_inference():
     assert message.data.model == "fake-detector"
     assert message.data.device == "cpu"
     assert message.data.detections[0].x_min == 0.1
+    assert message.data.detections[0].track_id == 1
     assert message.timestamp.tzinfo is not None
     assert ticks > 0
     assert detector.max_active == 1

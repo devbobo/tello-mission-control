@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 
 from app.models.vision import VisionDetection, VisionMessage
 from app.services.drone_manager import DroneManager
+from app.services.vision_tracking import DetectionTracker
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class VisionService:
         self._task: asyncio.Task | None = None
         self._running = False
         self._frame_id = 0
+        self._tracker = DetectionTracker()
 
     @property
     def model_path(self) -> Path | None:
@@ -98,10 +100,12 @@ class VisionService:
                         raw_detections = await self._run_detector(
                             detector, frame
                         )
-                        detections = [
-                            VisionDetection.model_validate(detection)
-                            for detection in raw_detections
-                        ]
+                        detections = self._tracker.update(
+                            [
+                                VisionDetection.model_validate(detection)
+                                for detection in raw_detections
+                            ]
+                        )
                         self._frame_id += 1
                         message = VisionMessage(
                             data={
