@@ -187,6 +187,8 @@ All environment variables are prefixed with `TELLO_`. See `.env.template` for th
 | `TELLO_TELLO_HOST` | `192.168.10.1` | Drone IP address |
 | `TELLO_API_PORT` | `8000` | Backend server port |
 | `TELLO_FRONTEND_PORT` | `3000` | Frontend server port (Docker) |
+| `TELLO_MCP_API_URL` | `http://127.0.0.1:8000` | Backend URL used by the local MCP server |
+| `TELLO_MCP_REQUEST_TIMEOUT` | `10.0` | MCP-to-backend request timeout in seconds |
 | `TELLO_TELEMETRY_POLL_HZ` | `4.0` | Telemetry polling frequency |
 | `TELLO_FLIGHT_LOG_DB_PATH` | `data/flight_logs.sqlite3` | SQLite database for flight sessions, commands, and telemetry |
 | `TELLO_VIDEO_FPS` | `30` | Video stream frame rate |
@@ -200,6 +202,29 @@ Connected flights are stored in SQLite at `TELLO_FLIGHT_LOG_DB_PATH`. Each sessi
 Docker Compose mounts a named volume at `/app/data` so the default database survives container recreation. For native development, the database path is relative to the backend working directory unless an absolute path is configured.
 
 The read-only API is available at `GET /api/flights` and `GET /api/flights/{flight_id}/events`. Both endpoints support pagination; event pages are ordered chronologically.
+
+## MCP Server
+
+The MCP server exposes the existing backend API over stdio. Start the backend first, then configure your MCP client to launch `python -m app.mcp_server` from the `backend` directory. For Claude Desktop, use an absolute interpreter path and set `PYTHONPATH` to the absolute `backend` directory:
+
+```json
+{
+  "mcpServers": {
+    "tello": {
+      "command": "/absolute/path/to/backend/.venv/bin/python",
+      "args": ["-m", "app.mcp_server"],
+      "env": {
+        "PYTHONPATH": "/absolute/path/to/backend",
+        "TELLO_MCP_API_URL": "http://127.0.0.1:8000"
+      }
+    }
+  }
+}
+```
+
+For Docker Compose, the MCP client can run the stdio process through `docker compose exec -T backend python -m app.mcp_server`, using an absolute `-f` path to this repository's compose file if the client starts in a different working directory. This requires the backend service to be running.
+
+Available tools: read drone status, connect/disconnect, take off, land, emergency stop, move 20–500 cm, and rotate 1–360°. The MCP process forwards all actions to the backend, preserving its validation and flight logging. These tools can physically move the drone; only enable the MCP server in a trusted client and require explicit user intent for flight actions. Use `TELLO_USE_MOCK_DRONE=true` for development without hardware.
 
 ## Project Structure
 
@@ -240,8 +265,8 @@ A roadmap of where this project could go, roughly ordered from most practical to
 
 ### Phase 1 — Platform Hardening
 
-- **MCP Server** — Expose drone commands as MCP tools so Claude (or any MCP client) can fly the drone through natural language
-- **Flight Logging & Replay** — Persist every command + telemetry snapshot to SQLite/TimescaleDB, replay sessions in the UI as a timeline
+- **MCP Server** *(implemented)* — Expose status and bounded drone control tools over stdio; see [MCP Server](#mcp-server)
+- **Flight Logging & Replay** *(implemented)* — Persist command outcomes and telemetry snapshots in SQLite with a read-only timeline in the UI; see [Flight History](#flight-history)
 - **Gamepad Support** — Map PS5/Xbox controllers via the Gamepad API to `send_rc_control()` for proper analog stick flying
 - **WebRTC Video** — Replace MJPEG with WebRTC for lower latency, better compression, and future peer-to-peer streaming
 
@@ -279,7 +304,7 @@ A roadmap of where this project could go, roughly ordered from most practical to
 - **Home Assistant Integration** — Trigger drone patrols from HA automations (e.g. "fly a perimeter check when motion is detected at night")
 - **3D Print Accessories** — Custom payload mounts, sensor brackets, and landing gear extensions
 
-> The MCP server is the single highest-leverage next step — once drone control is exposed as tools, everything in Phases 4+ becomes dramatically easier to build because Claude can orchestrate it all.
+> The MCP server and flight history now provide a foundation for agent-assisted control. Remaining Phase 1 work is gamepad support and WebRTC video.
 
 ## Challenges
 

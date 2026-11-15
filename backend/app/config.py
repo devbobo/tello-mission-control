@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
+    # MCP server
+    mcp_api_url: str = "http://127.0.0.1:8000"
+    mcp_request_timeout: float = 10.0
+
     # CORS
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
