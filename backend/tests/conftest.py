@@ -6,6 +6,7 @@ os.environ["TELLO_USE_MOCK_DRONE"] = "true"
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.main import app
 from app.services.drone_manager import DroneManager, MockTello
 from app.services.telemetry_service import TelemetryService
@@ -22,8 +23,9 @@ def drone_manager():
 
 
 @pytest.fixture
-def test_client():
+def test_client(tmp_path, monkeypatch):
     """Synchronous test client with fresh DroneManager in mock mode."""
+    monkeypatch.setattr(settings, "flight_log_db_path", tmp_path / "flight_logs.sqlite3")
     dm = DroneManager()
     ts = TelemetryService(dm)
     app.state.drone_manager = dm

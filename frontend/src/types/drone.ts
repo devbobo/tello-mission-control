@@ -19,6 +19,33 @@ export interface CommandLogEntry {
   error?: string;
 }
 
+export interface FlightSession {
+  id: string;
+  started_at: string;
+  ended_at: string | null;
+  status: 'active' | 'completed' | 'interrupted';
+  event_count: number;
+}
+
+export interface FlightEvent {
+  id: number;
+  session_id: string;
+  event_type: 'command' | 'telemetry';
+  occurred_at: string;
+  command: string | null;
+  params: Record<string, unknown>;
+  result: 'ok' | 'error' | null;
+  error: string | null;
+  telemetry: TelemetryData | null;
+}
+
+export interface FlightEventPage {
+  items: FlightEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface Sequence {
   id: string;
   name: string;

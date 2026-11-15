@@ -1,7 +1,8 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useDroneStore } from '@/stores/droneStore';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, History } from 'lucide-react';
 import type { CommandLogEntry } from '@/types/drone';
+import FlightHistoryModal from '@/components/FlightHistoryModal';
 
 function formatTimestamp(iso: string): string {
   const d = new Date(iso);
@@ -29,6 +30,7 @@ function LogEntry({ entry }: { entry: CommandLogEntry }) {
 }
 
 export default function CommandLog() {
+  const [historyOpen, setHistoryOpen] = useState(false);
   const commandLog = useDroneStore((s) => s.commandLog);
   const collapsed = useDroneStore((s) => s.commandLogCollapsed);
   const toggleCommandLog = useDroneStore((s) => s.toggleCommandLog);
@@ -65,11 +67,21 @@ export default function CommandLog() {
             </span>
           )}
         </div>
-        {!isEmpty && (
-          <button className="control-btn p-1" onClick={toggleCommandLog} aria-label="Toggle command log">
-            {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+        <div className="flex items-center gap-1">
+          <button
+            className="control-btn p-1"
+            onClick={() => setHistoryOpen(true)}
+            aria-label="Open flight history"
+            title="Flight history"
+          >
+            <History size={14} />
           </button>
-        )}
+          {!isEmpty && (
+            <button className="control-btn p-1" onClick={toggleCommandLog} aria-label="Toggle command log">
+              {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Entries */}
@@ -92,6 +104,7 @@ export default function CommandLog() {
           ))}
         </div>
       )}
+      <FlightHistoryModal isOpen={historyOpen} onClose={() => setHistoryOpen(false)} />
     </div>
   );
 }

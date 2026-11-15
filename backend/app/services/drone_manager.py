@@ -255,12 +255,18 @@ class DroneManager:
             try:
                 await cb(entry)
             except Exception:
+                logger.exception("Command log subscriber failed; removing it")
                 dead.append(cb)
         for cb in dead:
             try:
                 self._command_log_callbacks.remove(cb)
             except ValueError:
                 pass
+
+    async def log_command_failure(
+        self, command: str, params: dict, error: str
+    ) -> None:
+        await self._broadcast_command_log(command, params, "error", error)
 
     # -- Core execute method --
 
@@ -297,16 +303,20 @@ class DroneManager:
         if self._streaming:
             try:
                 await self.execute(self._tello.streamoff)
+                await self._broadcast_command_log("stream_off", {}, "ok")
             except Exception as e:
                 logger.warning("Failed to stop stream during disconnect: %s", e)
+                await self._broadcast_command_log("stream_off", {}, "error", str(e))
             self._streaming = False
             self._frame_read = None
 
         if self._flying:
             try:
                 await self.execute(self._tello.land)
+                await self._broadcast_command_log("land", {}, "ok")
             except Exception as e:
                 logger.warning("Failed to land during disconnect: %s", e)
+                await self._broadcast_command_log("land", {}, "error", str(e))
             self._flying = False
 
         await self.execute(self._tello.end)

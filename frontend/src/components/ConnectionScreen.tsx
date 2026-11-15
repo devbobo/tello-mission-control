@@ -1,6 +1,10 @@
+import { useState } from 'react';
+import { History } from 'lucide-react';
 import { useDroneStore } from '@/stores/droneStore';
+import FlightHistoryModal from '@/components/FlightHistoryModal';
 
 export default function ConnectionScreen() {
+  const [historyOpen, setHistoryOpen] = useState(false);
   const connectionStatus = useDroneStore((s) => s.connectionStatus);
   const connect = useDroneStore((s) => s.connect);
   const enterPreview = useDroneStore((s) => s.enterPreview);
@@ -13,6 +17,13 @@ export default function ConnectionScreen() {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black">
+      <button
+        className="control-btn absolute right-4 top-4 px-3 py-2 text-hud-xs"
+        onClick={() => setHistoryOpen(true)}
+      >
+        <History size={14} />
+        Flight History
+      </button>
       <h1 className="text-hud-3xl font-semibold uppercase tracking-[0.08em] text-white">
         TELLO WEB CONTROLLER
       </h1>
@@ -58,6 +69,7 @@ export default function ConnectionScreen() {
       <p className="mt-6 text-hud-sm text-hud-secondary">
         Ensure you are connected to the Tello Wi-Fi network
       </p>
+      <FlightHistoryModal isOpen={historyOpen} onClose={() => setHistoryOpen(false)} />
     </div>
   );
 }

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 
@@ -15,6 +17,9 @@ class Settings(BaseSettings):
 
     # Telemetry
     telemetry_poll_hz: float = 4.0
+
+    # Flight history
+    flight_log_db_path: Path = Path("data/flight_logs.sqlite3")
 
     # Video
     video_fps: int = 30

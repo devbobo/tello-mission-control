@@ -188,9 +188,18 @@ All environment variables are prefixed with `TELLO_`. See `.env.template` for th
 | `TELLO_API_PORT` | `8000` | Backend server port |
 | `TELLO_FRONTEND_PORT` | `3000` | Frontend server port (Docker) |
 | `TELLO_TELEMETRY_POLL_HZ` | `4.0` | Telemetry polling frequency |
+| `TELLO_FLIGHT_LOG_DB_PATH` | `data/flight_logs.sqlite3` | SQLite database for flight sessions, commands, and telemetry |
 | `TELLO_VIDEO_FPS` | `30` | Video stream frame rate |
 | `TELLO_VIDEO_JPEG_QUALITY` | `70` | JPEG compression quality |
 | `TELLO_CORS_ORIGINS` | `["http://localhost:3000","http://localhost:5173"]` | Allowed CORS origins |
+
+## Flight History
+
+Connected flights are stored in SQLite at `TELLO_FLIGHT_LOG_DB_PATH`. Each session records command results and telemetry snapshots at the configured polling frequency. The UI provides a read-only timeline from the Flight History button on the connection screen or command log.
+
+Docker Compose mounts a named volume at `/app/data` so the default database survives container recreation. For native development, the database path is relative to the backend working directory unless an absolute path is configured.
+
+The read-only API is available at `GET /api/flights` and `GET /api/flights/{flight_id}/events`. Both endpoints support pagination; event pages are ordered chronologically.
 
 ## Project Structure
 

@@ -108,6 +108,20 @@ describe('api client', () => {
     expect(res[0].id).toBe('patrol');
   });
 
+  it('getFlightSessions fetches recent flight sessions', async () => {
+    const spy = mockFetch([]);
+    await api.getFlightSessions();
+    expect(spy).toHaveBeenCalledWith('/api/flights?limit=100');
+  });
+
+  it('getFlightEvents fetches a paginated session timeline', async () => {
+    const spy = mockFetch({ items: [], total: 0, limit: 25, offset: 10 });
+    await api.getFlightEvents('flight-1', 25, 10);
+    expect(spy).toHaveBeenCalledWith(
+      '/api/flights/flight-1/events?limit=25&offset=10',
+    );
+  });
+
   it('runSequence sends POST with sequence id', async () => {
     const spy = mockFetch({ ok: true });
     await api.runSequence('patrol');

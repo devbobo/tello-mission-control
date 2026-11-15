@@ -1,6 +1,8 @@
 import type {
   ApiResponse,
   ConnectResponse,
+  FlightEventPage,
+  FlightSession,
   FlipDirection,
   MoveDirection,
   RotateDirection,
@@ -89,6 +91,21 @@ export async function takeSnapshot(): Promise<Blob> {
 
 export function getSequences(): Promise<Sequence[]> {
   return get<Sequence[]>('/api/sequences');
+}
+
+export function getFlightSessions(): Promise<FlightSession[]> {
+  return get<FlightSession[]>('/api/flights?limit=100');
+}
+
+export function getFlightEvents(
+  flightId: string,
+  limit = 100,
+  offset = 0,
+): Promise<FlightEventPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return get<FlightEventPage>(
+    `/api/flights/${encodeURIComponent(flightId)}/events?${params.toString()}`,
+  );
 }
 
 export function runSequence(id: string): Promise<ApiResponse> {

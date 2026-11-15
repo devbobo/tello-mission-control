@@ -66,6 +66,7 @@ class TelemetryService:
             try:
                 await cb(frame)
             except Exception:
+                logger.exception("Telemetry subscriber failed; removing it")
                 dead.append(cb)
         for cb in dead:
             self._subscribers.discard(cb)

@@ -3,6 +3,8 @@ services:
     build: ./backend
     container_name: tello-backend
     env_file: .env
+    volumes:
+      - backend-data:/app/data
     ports:
       - "${TELLO_API_PORT:-8000}:8000"
       - "8889:8889/udp"   # Tello control
@@ -18,3 +20,6 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  backend-data:

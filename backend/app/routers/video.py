@@ -13,6 +13,10 @@ router = APIRouter(prefix="/api/video", tags=["video"])
 logger = logging.getLogger(__name__)
 
 
+async def _log_stream_failure(drone_manager, command: str, error: Exception) -> None:
+    await drone_manager.log_command_failure(command, {}, str(error))
+
+
 async def _generate_mjpeg_frames(drone_manager):
     """Yield JPEG frames as multipart/x-mixed-replace chunks."""
     interval = 1.0 / settings.video_fps
@@ -47,6 +51,7 @@ async def video_stream(request: Request):
         try:
             await dm.stream_on()
         except Exception as e:
+            await _log_stream_failure(dm, "stream_on", e)
             raise HTTPException(status_code=500, detail=f"Failed to start stream: {e}")
 
     return StreamingResponse(
@@ -62,9 +67,11 @@ async def stream_start(request: Request):
     try:
         result = await dm.stream_on()
         return CommandResponse(**result)
-    except DroneNotConnectedError:
+    except DroneNotConnectedError as e:
+        await _log_stream_failure(dm, "stream_on", e)
         raise HTTPException(status_code=409, detail="Drone is not connected")
     except Exception as e:
+        await _log_stream_failure(dm, "stream_on", e)
         raise HTTPException(status_code=500, detail=f"Failed to start stream: {e}")
 
 
@@ -75,9 +82,11 @@ async def stream_stop(request: Request):
     try:
         result = await dm.stream_off()
         return CommandResponse(**result)
-    except DroneNotConnectedError:
+    except DroneNotConnectedError as e:
+        await _log_stream_failure(dm, "stream_off", e)
         raise HTTPException(status_code=409, detail="Drone is not connected")
     except Exception as e:
+        await _log_stream_failure(dm, "stream_off", e)
         raise HTTPException(status_code=500, detail=f"Failed to stop stream: {e}")
 
 
@@ -94,6 +103,7 @@ async def snapshot(request: Request):
         try:
             await dm.stream_on()
         except Exception as e:
+            await _log_stream_failure(dm, "stream_on", e)
             raise HTTPException(status_code=500, detail=f"Failed to start stream: {e}")
 
     frame = dm.get_frame()
