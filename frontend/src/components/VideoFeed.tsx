@@ -168,7 +168,7 @@ export default function VideoFeed() {
         muted
         playsInline
         aria-label="Tello video feed"
-        className="fixed inset-0 z-0 h-full w-full object-cover"
+        className="fixed inset-0 z-0 h-full w-full bg-black object-contain"
         onPlaying={() => setState('active')}
       />
 
