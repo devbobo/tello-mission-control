@@ -1,63 +1,66 @@
 import asyncio
-import logging
+from urllib.parse import urlsplit
 
 import cv2
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 
 from app.config import settings
 from app.models.commands import CommandResponse
+from app.models.video import WebRTCAnswer, WebRTCOffer
 from app.services.drone_manager import DroneNotConnectedError
 
 router = APIRouter(prefix="/api/video", tags=["video"])
-logger = logging.getLogger(__name__)
 
 
 async def _log_stream_failure(drone_manager, command: str, error: Exception) -> None:
     await drone_manager.log_command_failure(command, {}, str(error))
 
 
-async def _generate_mjpeg_frames(drone_manager):
-    """Yield JPEG frames as multipart/x-mixed-replace chunks."""
-    interval = 1.0 / settings.video_fps
-    encode_params = [cv2.IMWRITE_JPEG_QUALITY, settings.video_jpeg_quality]
-
-    while drone_manager.is_streaming:
-        frame = drone_manager.get_frame()
-        if frame is None:
-            await asyncio.sleep(interval)
-            continue
-
-        _, jpeg = cv2.imencode(".jpg", frame, encode_params)
-        yield (
-            b"--frame\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n"
-            + jpeg.tobytes()
-            + b"\r\n"
-        )
-        await asyncio.sleep(interval)
+@router.get("/webrtc/config")
+async def video_webrtc_config() -> dict[str, list[dict]]:
+    """Return ICE servers needed by both browser and backend peers."""
+    return {
+        "iceServers": [
+            server.model_dump(exclude_none=True)
+            for server in settings.webrtc_ice_servers
+        ]
+    }
 
 
-@router.get("/stream")
-async def video_stream(request: Request):
-    """MJPEG video stream. Frontend uses <img src="/api/video/stream" />."""
+@router.post("/webrtc/offer", response_model=WebRTCAnswer)
+async def video_webrtc_offer(request: Request, body: WebRTCOffer):
+    """Negotiate a WebRTC video peer using a browser-generated SDP offer."""
     dm = request.app.state.drone_manager
+    service = request.app.state.webrtc_service
+    origin = request.headers.get("origin")
+    try:
+        origin_host = urlsplit(origin).hostname if origin else None
+    except ValueError:
+        origin_host = None
+    public_host = settings.webrtc_public_host or origin_host or request.url.hostname
+    if not public_host:
+        raise HTTPException(status_code=400, detail="Unable to determine WebRTC host")
 
-    if not dm.is_connected:
+    try:
+        answer = await service.create_answer(body.sdp, public_host)
+        return WebRTCAnswer(**answer)
+    except DroneNotConnectedError as e:
+        await _log_stream_failure(dm, "webrtc_offer", e)
         raise HTTPException(status_code=409, detail="Drone is not connected")
+    except ValueError as e:
+        await _log_stream_failure(dm, "webrtc_offer", e)
+        raise HTTPException(status_code=400, detail=f"Invalid WebRTC offer: {e}")
+    except Exception as e:
+        await _log_stream_failure(dm, "webrtc_offer", e)
+        raise HTTPException(status_code=500, detail=f"WebRTC negotiation failed: {e}")
 
-    # Auto-start the stream if not already running
-    if not dm.is_streaming:
-        try:
-            await dm.stream_on()
-        except Exception as e:
-            await _log_stream_failure(dm, "stream_on", e)
-            raise HTTPException(status_code=500, detail=f"Failed to start stream: {e}")
 
-    return StreamingResponse(
-        _generate_mjpeg_frames(dm),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-    )
+@router.delete("/webrtc/{peer_id}", status_code=204)
+async def close_webrtc_peer(request: Request, peer_id: str):
+    """Close a browser's WebRTC peer connection."""
+    await request.app.state.webrtc_service.close_peer(peer_id)
+    return Response(status_code=204)
 
 
 @router.post("/stream/start", response_model=CommandResponse)
@@ -77,9 +80,10 @@ async def stream_start(request: Request):
 
 @router.post("/stream/stop", response_model=CommandResponse)
 async def stream_stop(request: Request):
-    """Explicitly stop the video stream."""
+    """Close video peers and explicitly stop the video stream."""
     dm = request.app.state.drone_manager
     try:
+        await request.app.state.webrtc_service.close_all()
         result = await dm.stream_off()
         return CommandResponse(**result)
     except DroneNotConnectedError as e:
@@ -98,7 +102,6 @@ async def snapshot(request: Request):
     if not dm.is_connected:
         raise HTTPException(status_code=409, detail="Drone is not connected")
 
-    # Auto-start stream if needed to get a frame
     if not dm.is_streaming:
         try:
             await dm.stream_on()
@@ -107,6 +110,9 @@ async def snapshot(request: Request):
             raise HTTPException(status_code=500, detail=f"Failed to start stream: {e}")
 
     frame = dm.get_frame()
+    if frame is None:
+        await asyncio.sleep(0.01)
+        frame = dm.get_frame()
     if frame is None:
         raise HTTPException(status_code=503, detail="No frame available")
 

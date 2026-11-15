@@ -146,10 +146,6 @@ describe('api client', () => {
     expect(res.ok).toBe(false);
   });
 
-  it('VIDEO_STREAM_URL is correct', () => {
-    expect(api.VIDEO_STREAM_URL).toBe('/api/video/stream');
-  });
-
   it('startVideoStream sends POST to /api/video/stream/start', async () => {
     const spy = mockFetch({ ok: true });
     const res = await api.startVideoStream();
@@ -162,5 +158,31 @@ describe('api client', () => {
     const res = await api.stopVideoStream();
     expect(spy).toHaveBeenCalledWith('/api/video/stream/stop', expect.objectContaining({ method: 'POST' }));
     expect(res.ok).toBe(true);
+  });
+
+  it('createWebRtcOffer sends an offer and returns the peer answer', async () => {
+    const spy = mockFetch({ sdp: 'answer-sdp', type: 'answer', peer_id: 'peer-1' });
+    const answer = await api.createWebRtcOffer('offer-sdp');
+    expect(spy).toHaveBeenCalledWith(
+      '/api/video/webrtc/offer',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ sdp: 'offer-sdp', type: 'offer' }),
+      }),
+    );
+    expect(answer.peer_id).toBe('peer-1');
+  });
+
+  it('getWebRtcConfiguration returns configured ICE servers', async () => {
+    const spy = mockFetch({ iceServers: [{ urls: 'stun:stun.example.test' }] });
+    const configuration = await api.getWebRtcConfiguration();
+    expect(spy).toHaveBeenCalledWith('/api/video/webrtc/config');
+    expect(configuration.iceServers).toHaveLength(1);
+  });
+
+  it('closeWebRtcPeer sends DELETE for the session', async () => {
+    const spy = mockFetch(null);
+    await api.closeWebRtcPeer('peer-1');
+    expect(spy).toHaveBeenCalledWith('/api/video/webrtc/peer-1', { method: 'DELETE' });
   });
 });

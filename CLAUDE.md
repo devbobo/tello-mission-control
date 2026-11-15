@@ -77,7 +77,7 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 │   │   ├── config.py               # pydantic-settings with TELLO_ env prefix
 │   │   ├── routers/
 │   │   │   ├── control.py          # POST /api/control/* (connect, takeoff, move, etc.)
-│   │   │   ├── video.py            # GET /api/video/stream (MJPEG), POST /api/video/snapshot
+│   │   │   ├── video.py            # WebRTC offer/close, stream control, JPEG snapshot
 │   │   │   ├── telemetry.py        # WS /api/ws/telemetry
 │   │   │   ├── sequences.py        # GET /api/sequences (stub)
 │   │   │   └── status.py           # GET /api/status
@@ -90,7 +90,7 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 │   └── tests/                      # pytest (54 tests)
 ├── frontend/                       # React + Vite + TailwindCSS
 │   ├── Dockerfile                  # Multi-stage: Node build → Nginx runtime
-│   ├── nginx.conf                  # SPA fallback + API/WS/MJPEG reverse proxy
+│   ├── nginx.conf                  # SPA fallback + API/WS reverse proxy
 │   └── src/
 ├── sample_drone_integration/       # djitellopy reference scripts for developers
 ├── docs/                           # PRD & Architecture docs
@@ -103,7 +103,7 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 
 - **Command serialization**: Tello SDK processes one command at a time. `DroneManager` uses `asyncio.Lock` to serialize all commands. Emergency bypasses the lock for instant response.
 - **Mock mode**: Set `TELLO_USE_MOCK_DRONE=true` to run without a physical drone. MockTello generates placeholder video frames and simulates all telemetry.
-- **Video via MJPEG over HTTP** (`multipart/x-mixed-replace`). Frontend renders with `<img src="/api/video/stream" />`.
+- **Video via WebRTC**. The browser exchanges SDP over HTTP with FastAPI; the backend streams captured frames over UDP.
 - **Telemetry via WebSocket push** at ~4 Hz from a background polling task — not client-polled.
 - **Docker networking**: Uses standard bridge networking. Frontend Nginx proxies to backend via Docker DNS (`http://backend:8000`). For real drone on Linux, add `network_mode: host` to backend service.
 - **No authentication** in v1 — the app runs on the Tello's isolated Wi-Fi network.
@@ -113,7 +113,7 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 
 ### Implemented
 - REST: `POST /api/control/{connect,disconnect,takeoff,land,emergency,move,rotate}`
-- REST: `GET /api/video/stream` (MJPEG), `POST /api/video/stream/start`, `POST /api/video/stream/stop`, `POST /api/video/snapshot`
+- REST: `POST /api/video/webrtc/offer`, `DELETE /api/video/webrtc/{peer_id}`, `POST /api/video/stream/{start,stop}`, `POST /api/video/snapshot`
 - REST: `GET /api/status` — `{ connected, flying, streaming, battery }`
 - REST: `GET /api/sequences` — stub, returns `[]`
 - WebSocket: `WS /api/ws/telemetry` — pushes telemetry frames (~4Hz) with `{battery, height, flight_time, temperature{high,low}, attitude{pitch,roll,yaw}, speed{x,y,z}, barometer, tof_distance}` and command log events

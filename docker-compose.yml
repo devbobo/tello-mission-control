@@ -5,8 +5,11 @@ services:
     env_file: .env
     volumes:
       - backend-data:/app/data
+    sysctls:
+      net.ipv4.ip_local_port_range: "40000 40100"
     ports:
       - "${TELLO_API_PORT:-8000}:8000"
+      - "40000-40100:40000-40100/udp" # WebRTC media
       - "8889:8889/udp"   # Tello control
       - "8890:8890/udp"   # Tello state
       - "11111:11111/udp" # Tello video stream

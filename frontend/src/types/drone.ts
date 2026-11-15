@@ -84,6 +84,22 @@ export interface StatusResponse {
   battery: number;
 }
 
+export interface WebRtcAnswer {
+  sdp: string;
+  type: 'answer';
+  peer_id: string;
+}
+
+export interface WebRtcIceServer {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+export interface WebRtcConfiguration {
+  iceServers: WebRtcIceServer[];
+}
+
 export interface WsMessage {
   type: 'telemetry' | 'command_log' | 'sequence_progress';
   data: TelemetryData | CommandLogEntry | SequenceProgress;

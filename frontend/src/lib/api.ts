@@ -8,9 +8,9 @@ import type {
   RotateDirection,
   Sequence,
   StatusResponse,
+  WebRtcAnswer,
+  WebRtcConfiguration,
 } from '@/types/drone';
-
-export const VIDEO_STREAM_URL = '/api/video/stream';
 
 async function post<T>(
   path: string,
@@ -95,6 +95,32 @@ export async function takeSnapshot(): Promise<Blob> {
     throw new Error(`Snapshot failed: HTTP ${res.status}`);
   }
   return res.blob();
+}
+
+export async function createWebRtcOffer(sdp: string): Promise<WebRtcAnswer> {
+  const res = await fetch('/api/video/webrtc/offer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sdp, type: 'offer' }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { detail?: string } | null;
+    throw new Error(body?.detail ?? `WebRTC negotiation failed: HTTP ${res.status}`);
+  }
+  return res.json() as Promise<WebRtcAnswer>;
+}
+
+export function getWebRtcConfiguration(): Promise<WebRtcConfiguration> {
+  return get<WebRtcConfiguration>('/api/video/webrtc/config');
+}
+
+export async function closeWebRtcPeer(peerId: string): Promise<void> {
+  const res = await fetch(`/api/video/webrtc/${encodeURIComponent(peerId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to close WebRTC peer: HTTP ${res.status}`);
+  }
 }
 
 export function getSequences(): Promise<Sequence[]> {

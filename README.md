@@ -94,13 +94,9 @@ curl -X POST http://localhost:8000/api/control/emergency
 curl -X POST http://localhost:8000/api/control/disconnect
 ```
 
-### Video Stream
+### WebRTC Video
 
-Open in browser or use in an `<img>` tag:
-
-```
-http://localhost:8000/api/video/stream
-```
+The web app negotiates a WebRTC video connection automatically after connecting to the drone. Signaling uses the backend HTTP API; media travels directly over UDP. The Docker Compose setup publishes UDP ports `40000-40100` for WebRTC media. Ensure these ports are allowed between the browser and the backend host.
 
 ### Telemetry (WebSocket)
 
@@ -160,7 +156,8 @@ python -m pytest -v    # 54 tests, all use MockTello (no drone needed)
 | POST | `/api/control/emergency` | Emergency motor kill |
 | POST | `/api/control/move` | Move (body: `{direction, distance_cm}`) |
 | POST | `/api/control/rotate` | Rotate (body: `{direction, angle_deg}`) |
-| GET | `/api/video/stream` | MJPEG video stream |
+| POST | `/api/video/webrtc/offer` | Exchange a browser SDP offer for an SDP answer and peer ID |
+| DELETE | `/api/video/webrtc/{peer_id}` | Close a WebRTC peer |
 | POST | `/api/video/stream/start` | Start video stream |
 | POST | `/api/video/stream/stop` | Stop video stream |
 | POST | `/api/video/snapshot` | Capture single JPEG frame |
@@ -193,6 +190,8 @@ All environment variables are prefixed with `TELLO_`. See `.env.template` for th
 | `TELLO_FLIGHT_LOG_DB_PATH` | `data/flight_logs.sqlite3` | SQLite database for flight sessions, commands, and telemetry |
 | `TELLO_VIDEO_FPS` | `30` | Video stream frame rate |
 | `TELLO_VIDEO_JPEG_QUALITY` | `70` | JPEG compression quality |
+| `TELLO_WEBRTC_PUBLIC_HOST` | Origin/request host | Hostname/IP advertised in WebRTC ICE candidates |
+| `TELLO_WEBRTC_ICE_SERVERS` | `[]` | JSON array of ICE servers shared with the browser (STUN/TURN) |
 | `TELLO_CORS_ORIGINS` | `["http://localhost:3000","http://localhost:5173"]` | Allowed CORS origins |
 
 ## Flight History
@@ -202,6 +201,14 @@ Connected flights are stored in SQLite at `TELLO_FLIGHT_LOG_DB_PATH`. Each sessi
 Docker Compose mounts a named volume at `/app/data` so the default database survives container recreation. For native development, the database path is relative to the backend working directory unless an absolute path is configured.
 
 The read-only API is available at `GET /api/flights` and `GET /api/flights/{flight_id}/events`. Both endpoints support pagination; event pages are ordered chronologically.
+
+## WebRTC Video
+
+The browser sends an SDP offer to `POST /api/video/webrtc/offer`; the backend returns an SDP answer and peer ID. The backend sends captured Tello frames using WebRTC, while snapshots remain available through `POST /api/video/snapshot`. The peer is closed automatically when the video component unmounts or the drone disconnects.
+
+In Docker Compose, UDP ports `40000-40100` are mapped to the backend and used for media. The backend advertises the browser's Origin host (or request host when Origin is absent) by default. Set `TELLO_WEBRTC_PUBLIC_HOST` when a reverse proxy or NAT requires a different browser-reachable address, and forward the configured UDP range to the backend. WebRTC requires direct UDP connectivity; opening only the HTTP/API port is not sufficient.
+
+For networks that need ICE traversal, set `TELLO_WEBRTC_ICE_SERVERS` to a JSON array of standard ICE server objects, for example `[{"urls":"stun:stun.example.org:3478"}]`. The same server configuration is returned to the browser and used by the backend. TURN credentials are sent to the browser, so use short-lived credentials rather than embedding permanent secrets in the frontend.
 
 ## Gamepad Control
 
@@ -276,7 +283,7 @@ A roadmap of where this project could go, roughly ordered from most practical to
 - **MCP Server** *(implemented)* — Expose status and bounded drone control tools over stdio; see [MCP Server](#mcp-server)
 - **Flight Logging & Replay** *(implemented)* — Persist command outcomes and telemetry snapshots in SQLite with a read-only timeline in the UI; see [Flight History](#flight-history)
 - **Gamepad Support** *(implemented)* — Map PS5/Xbox controllers via the Gamepad API to `send_rc_control()` for proper analog stick flying; see [Gamepad Control](#gamepad-control)
-- **WebRTC Video** — Replace MJPEG with WebRTC for lower latency, better compression, and future peer-to-peer streaming
+- **WebRTC Video** *(implemented)* — Stream captured video over a peer-to-peer WebRTC connection; see [WebRTC Video](#webrtc-video)
 
 ### Phase 2 — Computer Vision
 
@@ -312,7 +319,7 @@ A roadmap of where this project could go, roughly ordered from most practical to
 - **Home Assistant Integration** — Trigger drone patrols from HA automations (e.g. "fly a perimeter check when motion is detected at night")
 - **3D Print Accessories** — Custom payload mounts, sensor brackets, and landing gear extensions
 
-> The MCP server, flight history, and gamepad controls provide a foundation for agent-assisted control. Remaining Phase 1 work is WebRTC video.
+> The MCP server, flight history, gamepad controls, and WebRTC video complete the Phase 1 platform-hardening work.
 
 ## Challenges
 

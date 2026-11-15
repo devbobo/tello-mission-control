@@ -69,7 +69,7 @@ tello-web-controller/
 │       │   └── useKeyboard.ts         # Keyboard shortcut bindings
 │       ├── components/
 │       │   ├── Header.tsx             # Connection controls + status badge
-│       │   ├── VideoFeed.tsx          # MJPEG / img stream display
+│       │   ├── VideoFeed.tsx          # WebRTC video negotiation and playback
 │       │   ├── TelemetryPanel.tsx     # Battery, height, IMU gauges
 │       │   ├── FlightControls.tsx     # Directional buttons, takeoff/land
 │       │   ├── FlipControls.tsx       # Flip direction buttons
@@ -92,7 +92,7 @@ tello-web-controller/
 │   │   ├── routers/
 │   │   │   ├── control.py            # POST /api/control/* endpoints
 │   │   │   ├── telemetry.py          # WS  /api/ws/telemetry
-│   │   │   ├── video.py              # GET /api/video/stream (MJPEG)
+│   │   │   ├── video.py              # WebRTC signaling, stream control, snapshots
 │   │   │   └── sequences.py          # POST /api/sequences/*
 │   │   ├── services/
 │   │   │   ├── drone_manager.py      # Singleton Tello wrapper + command queue
@@ -156,10 +156,10 @@ FastAPI App
 │   ├── Reads: battery, height, flight_time, temp, IMU, speed
 │   └── Broadcasts via WebSocket to all clients
 │
-├── VideoService
-│   ├── get_frame_read() → BackgroundFrameRead
-│   ├── Encodes frames as JPEG
-│   └── Serves as MJPEG stream (multipart/x-mixed-replace)
+├── WebRTCService
+│   ├── Reuses DroneManager's BackgroundFrameRead
+│   ├── Converts OpenCV frames to aiortc VideoFrame objects
+│   └── Tracks browser peer connections and closes them on teardown
 │
 └── SequenceRunner
     ├── Loads built-in sequences
@@ -185,7 +185,9 @@ FastAPI App
 | POST   | `/api/control/rotate`        | Rotate CW/CCW                  | `{ direction, angle_deg }`      | `{ ok, message }`         |
 | POST   | `/api/control/flip`          | Execute flip                   | `{ direction }`                 | `{ ok, message }`         |
 | POST   | `/api/control/rc`            | RC control (joystick)          | `{ lr, fb, ud, yaw }`          | `{ ok }`                  |
-| GET    | `/api/video/stream`          | MJPEG video stream             | —                               | `multipart/x-mixed-replace` |
+| GET    | `/api/video/webrtc/config`   | ICE server configuration       | —                               | `{ iceServers }`            |
+| POST   | `/api/video/webrtc/offer`    | Negotiate WebRTC video         | `{ sdp, type: "offer" }`        | `{ sdp, type, peer_id }`    |
+| DELETE | `/api/video/webrtc/{peer_id}`| Close WebRTC peer              | —                               | —                           |
 | POST   | `/api/video/snapshot`        | Capture single frame           | —                               | JPEG binary               |
 | GET    | `/api/sequences`             | List available sequences       | —                               | `[{ id, name, steps }]`  |
 | POST   | `/api/sequences/{id}/run`    | Execute a sequence             | —                               | `{ ok, run_id }`          |
@@ -263,30 +265,11 @@ class DroneManager:
             return await asyncio.to_thread(fn, *args)
 ```
 
-### 6.2 Video Streaming — MJPEG over HTTP
+### 6.2 Video Streaming — WebRTC
 
-Rather than piping frames through WebSocket (high overhead for binary data), the backend serves an MJPEG stream via a standard HTTP endpoint using `multipart/x-mixed-replace`. The frontend renders it in a simple `<img>` tag. This approach is simple, low-latency, and doesn't require WebRTC complexity.
+The browser creates a receive-only video offer and sends its SDP to `POST /api/video/webrtc/offer`. FastAPI starts the Tello video stream if needed, adds a frame-backed `VideoStreamTrack`, and returns an SDP answer. The browser then receives video over a peer-to-peer UDP connection rather than repeated JPEG images over HTTP. The peer is closed when the UI unmounts, the API explicitly closes it, or the drone disconnects.
 
-```python
-@router.get("/stream")
-async def video_stream():
-    return StreamingResponse(
-        generate_frames(),
-        media_type="multipart/x-mixed-replace; boundary=frame"
-    )
-
-async def generate_frames():
-    while drone_manager.is_streaming:
-        frame = drone_manager.get_frame()
-        _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-        yield (
-            b"--frame\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n"
-            + jpeg.tobytes()
-            + b"\r\n"
-        )
-        await asyncio.sleep(1 / 30)  # 30 FPS cap
-```
+`GET /api/video/webrtc/config` shares the configured ICE server list with the browser. `TELLO_WEBRTC_PUBLIC_HOST` can override the address advertised in host ICE candidates. Docker Compose maps UDP `40000-40100` to the backend; deployments behind NAT or restrictive firewalls must configure ICE traversal and route media traffic to those ports.
 
 ### 6.3 Telemetry via WebSocket
 
@@ -294,7 +277,7 @@ Telemetry is pushed from backend → frontend (not polled) to minimize overhead.
 
 ### 6.4 Docker Networking
 
-The Tello drone creates its own Wi-Fi AP at `192.168.10.1`. The backend container must be able to send/receive UDP on ports 8889, 8890, and 11111. On Linux, `network_mode: host` is the simplest solution. For macOS/Windows, explicit UDP port mapping is required since Docker Desktop runs containers in a Linux VM.
+The Tello drone creates its own Wi-Fi AP at `192.168.10.1`. The backend container must be able to send/receive UDP on ports 8889, 8890, and 11111. On Linux, `network_mode: host` is the simplest solution. For macOS/Windows, explicit UDP port mapping is required since Docker Desktop runs containers in a Linux VM. WebRTC media also requires UDP ports `40000-40100` to be forwarded to the backend and the browser-reachable host to be advertised in ICE candidates.
 
 ---
 
@@ -431,13 +414,13 @@ User clicks "Move Forward 100cm"
                                        │
                                   frame (numpy array)
                                        │
-                                  cv2.imencode('.jpg')
+                               aiortc VideoStreamTrack
                                        │
-                              MJPEG StreamingResponse
+                                SDP offer/answer
                                        │
-                         GET /api/video/stream
+                          WebRTC media over UDP
                                        │
-                              <img src="..."> in React
+                              <video> in React
 ```
 
 ---
@@ -480,7 +463,7 @@ The `djitellopy` library can be mocked by replacing `Tello()` with a fake class 
 
 ## 12. Future Considerations (Out of Scope for v1)
 
-- **WebRTC video** — lower latency alternative to MJPEG for higher-quality streaming.
+- **WebRTC video** — implemented for browser video streaming.
 - **Gamepad support** — map physical game controllers to RC control.
 - **Flight recording & replay** — log all commands with timestamps for playback.
 - **3D visualization** — render the drone's position/attitude in a Three.js scene.

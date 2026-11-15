@@ -1,6 +1,9 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
+
+from app.models.video import WebRTCIceServer
 
 
 class Settings(BaseSettings):
@@ -28,6 +31,8 @@ class Settings(BaseSettings):
     # Video
     video_fps: int = 30
     video_jpeg_quality: int = 70
+    webrtc_public_host: str | None = None
+    webrtc_ice_servers: list[WebRTCIceServer] = Field(default_factory=list)
 
     # Mock mode (for development/testing without a physical drone)
     use_mock_drone: bool = False

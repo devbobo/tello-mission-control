@@ -1,5 +1,9 @@
-import pytest
+from unittest.mock import AsyncMock
+
 from fastapi.testclient import TestClient
+
+from app.config import settings
+from app.models.video import WebRTCIceServer
 
 
 def test_stream_start_requires_connection(test_client: TestClient):
@@ -43,37 +47,80 @@ def test_snapshot_returns_jpeg(test_client: TestClient):
     assert resp.content[:2] == b"\xff\xd8"
 
 
-def test_mjpeg_stream_requires_connection(test_client: TestClient):
-    resp = test_client.get("/api/video/stream")
+def test_webrtc_offer_requires_connection(test_client: TestClient):
+    resp = test_client.post(
+        "/api/video/webrtc/offer",
+        json={"sdp": "browser-offer", "type": "offer"},
+    )
     assert resp.status_code == 409
 
 
-def test_mjpeg_stream_auto_starts(test_client: TestClient):
-    """Verify that GET /api/video/stream auto-starts streaming."""
-    test_client.post("/api/control/connect")
+def test_webrtc_config_returns_ice_servers(test_client: TestClient, monkeypatch):
+    monkeypatch.setattr(
+        settings,
+        "webrtc_ice_servers",
+        [WebRTCIceServer(urls="stun:stun.example.test")],
+    )
 
-    # Check streaming is off
-    status = test_client.get("/api/status").json()
-    assert status["streaming"] is False
+    resp = test_client.get("/api/video/webrtc/config")
 
-    # Stop stream after first frame so the generator exits
-    dm = test_client.app.state.drone_manager
-
-    import threading
-
-    def stop_after_delay():
-        import time
-        time.sleep(0.3)
-        dm._streaming = False
-
-    threading.Thread(target=stop_after_delay, daemon=True).start()
-
-    resp = test_client.get("/api/video/stream")
     assert resp.status_code == 200
-    assert "multipart/x-mixed-replace" in resp.headers["content-type"]
-    # Response body should contain at least one JPEG frame
-    assert b"--frame" in resp.content
-    assert b"\xff\xd8" in resp.content  # JPEG magic bytes
+    assert resp.json() == {"iceServers": [{"urls": "stun:stun.example.test"}]}
+
+
+def test_webrtc_offer_returns_peer_answer(test_client: TestClient, monkeypatch):
+    service = test_client.app.state.webrtc_service
+    create_answer = AsyncMock(
+        return_value={"sdp": "browser-answer", "type": "answer", "peer_id": "peer-1"}
+    )
+    monkeypatch.setattr(service, "create_answer", create_answer)
+    monkeypatch.setattr(settings, "webrtc_public_host", None)
+
+    resp = test_client.post(
+        "/api/video/webrtc/offer",
+        json={"sdp": "browser-offer", "type": "offer"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "sdp": "browser-answer",
+        "type": "answer",
+        "peer_id": "peer-1",
+    }
+    create_answer.assert_awaited_once_with("browser-offer", "testserver")
+
+
+def test_webrtc_offer_uses_browser_origin_host(test_client: TestClient, monkeypatch):
+    service = test_client.app.state.webrtc_service
+    create_answer = AsyncMock(
+        return_value={"sdp": "browser-answer", "type": "answer", "peer_id": "peer-1"}
+    )
+    monkeypatch.setattr(service, "create_answer", create_answer)
+    monkeypatch.setattr(settings, "webrtc_public_host", None)
+
+    resp = test_client.post(
+        "/api/video/webrtc/offer",
+        json={"sdp": "browser-offer", "type": "offer"},
+        headers={"Origin": "http://controller.local:3000"},
+    )
+
+    assert resp.status_code == 200
+    create_answer.assert_awaited_once_with("browser-offer", "controller.local")
+
+
+def test_webrtc_peer_can_be_closed(test_client: TestClient, monkeypatch):
+    service = test_client.app.state.webrtc_service
+    close_peer = AsyncMock()
+    monkeypatch.setattr(service, "close_peer", close_peer)
+
+    resp = test_client.delete("/api/video/webrtc/peer-1")
+
+    assert resp.status_code == 204
+    close_peer.assert_awaited_once_with("peer-1")
+
+
+def test_mjpeg_stream_endpoint_removed(test_client: TestClient):
+    assert test_client.get("/api/video/stream").status_code == 404
 
 
 def test_status_includes_streaming(test_client: TestClient):

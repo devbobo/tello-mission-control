@@ -1,27 +1,147 @@
-import { useState, useEffect, useRef } from 'react';
-import { VIDEO_STREAM_URL } from '@/lib/api';
+import { useEffect, useRef, useState } from 'react';
+import { closeWebRtcPeer, createWebRtcOffer, getWebRtcConfiguration } from '@/lib/api';
 import { useDroneStore } from '@/stores/droneStore';
 
 type FeedState = 'loading' | 'active' | 'error';
 
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 2000;
+const ICE_GATHERING_TIMEOUT_MS = 10000;
+
+function waitForIceGatheringComplete(peer: RTCPeerConnection): Promise<void> {
+  if (peer.iceGatheringState === 'complete') return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      peer.removeEventListener('icegatheringstatechange', handleStateChange);
+      clearTimeout(timeout);
+    };
+    const handleStateChange = () => {
+      if (peer.iceGatheringState === 'complete') {
+        cleanup();
+        resolve();
+      }
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('Timed out gathering WebRTC connection candidates'));
+    }, ICE_GATHERING_TIMEOUT_MS);
+
+    peer.addEventListener('icegatheringstatechange', handleStateChange);
+    handleStateChange();
+  });
+}
 
 export default function VideoFeed() {
   const previewMode = useDroneStore((s) => s.previewMode);
   const [state, setState] = useState<FeedState>('loading');
-  const [streamUrl, setStreamUrl] = useState(VIDEO_STREAM_URL);
-  const retryCount = useRef(0);
-  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Clean up retry timer on unmount
   useEffect(() => {
-    return () => {
-      if (retryTimer.current) clearTimeout(retryTimer.current);
-    };
-  }, []);
+    if (previewMode) return;
 
-  // In preview mode, show a dark placeholder — no video stream to connect to
+    let disposed = false;
+    let retries = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retrying = false;
+    let peer: RTCPeerConnection | null = null;
+    let peerId: string | null = null;
+
+    let connect: () => Promise<void>;
+
+    const closeActivePeer = async () => {
+      const currentPeer = peer;
+      const currentPeerId = peerId;
+      peer = null;
+      peerId = null;
+      currentPeer?.close();
+      if (videoRef.current) videoRef.current.srcObject = null;
+      if (currentPeerId) {
+        try {
+          await closeWebRtcPeer(currentPeerId);
+        } catch (error) {
+          console.error('Failed to close WebRTC video peer:', error);
+        }
+      }
+    };
+
+    const retry = async () => {
+      if (disposed || retrying) return;
+      retrying = true;
+      await closeActivePeer();
+      if (disposed) return;
+      if (retries >= MAX_RETRIES) {
+        setState('error');
+        return;
+      }
+      setState('loading');
+      retryTimer = setTimeout(() => {
+        retries += 1;
+        retrying = false;
+        void connect();
+      }, RETRY_DELAY_MS);
+    };
+
+    connect = async () => {
+      if (disposed) return;
+      setState('loading');
+      try {
+        const configuration = await getWebRtcConfiguration();
+        if (disposed) return;
+        const connection = new RTCPeerConnection(configuration);
+        peer = connection;
+        connection.addTransceiver('video', { direction: 'recvonly' });
+        connection.ontrack = (event) => {
+          if (disposed || !videoRef.current) return;
+          videoRef.current.srcObject =
+            event.streams[0] ?? new MediaStream([event.track]);
+          void videoRef.current.play().catch(() => retry());
+        };
+        connection.onconnectionstatechange = () => {
+          if (connection.connectionState === 'failed') void retry();
+        };
+
+        const offer = await connection.createOffer();
+        await connection.setLocalDescription(offer);
+        await waitForIceGatheringComplete(connection);
+        if (disposed) return;
+        const localDescription = connection.localDescription;
+        if (!localDescription?.sdp) throw new Error('WebRTC offer was not created');
+
+        const answer = await createWebRtcOffer(localDescription.sdp);
+        peerId = answer.peer_id;
+        if (disposed) {
+          await closeActivePeer();
+          return;
+        }
+        await connection.setRemoteDescription({
+          sdp: answer.sdp,
+          type: answer.type,
+        });
+      } catch {
+        await retry();
+      }
+    };
+
+    void connect();
+
+    return () => {
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      const currentPeer = peer;
+      const currentPeerId = peerId;
+      peer = null;
+      peerId = null;
+      currentPeer?.close();
+      if (videoRef.current) videoRef.current.srcObject = null;
+      if (currentPeerId) {
+        void closeWebRtcPeer(currentPeerId).catch((error: unknown) => {
+          console.error('Failed to close WebRTC video peer:', error);
+        });
+      }
+    };
+  }, [previewMode]);
+
   if (previewMode) {
     return (
       <div className="fixed inset-0 z-0 flex items-center justify-center bg-[#0A0A0A]">
@@ -40,32 +160,16 @@ export default function VideoFeed() {
     );
   }
 
-  const handleLoad = () => {
-    setState('active');
-    retryCount.current = 0;
-  };
-
-  const handleError = () => {
-    if (retryCount.current < MAX_RETRIES) {
-      setState('loading');
-      retryTimer.current = setTimeout(() => {
-        retryCount.current += 1;
-        // Cache-buster forces browser to retry the stream
-        setStreamUrl(`${VIDEO_STREAM_URL}?t=${Date.now()}`);
-      }, RETRY_DELAY_MS);
-    } else {
-      setState('error');
-    }
-  };
-
   return (
     <>
-      <img
-        src={streamUrl}
-        alt="Tello video feed"
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        aria-label="Tello video feed"
         className="fixed inset-0 z-0 h-full w-full object-cover"
-        onLoad={handleLoad}
-        onError={handleError}
+        onPlaying={() => setState('active')}
       />
 
       {state === 'loading' && (

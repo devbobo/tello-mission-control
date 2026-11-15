@@ -39,6 +39,7 @@ async def connect(request: Request):
 async def disconnect(request: Request):
     dm = _get_dm(request)
     try:
+        await request.app.state.webrtc_service.close_all()
         result = await dm.disconnect()
         return CommandResponse(**result)
     except Exception as e:

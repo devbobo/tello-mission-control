@@ -9,6 +9,7 @@ from app.routers import control, flights, sequences, status, telemetry, video
 from app.services.drone_manager import DroneManager
 from app.services.flight_log_service import FlightLogService
 from app.services.telemetry_service import TelemetryService
+from app.services.webrtc_service import WebRTCService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,11 +21,18 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Tello Web Controller backend...")
     dm = DroneManager()
     ts = TelemetryService(dm)
+    webrtc_service = WebRTCService(
+        dm,
+        settings.video_fps,
+        settings.webrtc_public_host,
+        settings.webrtc_ice_servers,
+    )
     flight_log_service = FlightLogService(settings.flight_log_db_path)
     await flight_log_service.start()
     dm.add_command_log_callback(flight_log_service.handle_command_log)
     ts.subscribe(flight_log_service.record_telemetry)
     app.state.drone_manager = dm
+    app.state.webrtc_service = webrtc_service
     app.state.telemetry_service = ts
     app.state.flight_log_service = flight_log_service
     await ts.start()
@@ -35,6 +43,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down...")
     await ts.stop()
+    await webrtc_service.close_all()
     await dm.shutdown()
     await flight_log_service.stop()
     logger.info("Shutdown complete.")
