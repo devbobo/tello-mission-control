@@ -1,4 +1,7 @@
 import asyncio
+import ipaddress
+import logging
+import socket
 from urllib.parse import urlsplit
 
 import cv2
@@ -11,6 +14,36 @@ from app.models.video import WebRTCAnswer, WebRTCOffer
 from app.services.drone_manager import DroneNotConnectedError
 
 router = APIRouter(prefix="/api/video", tags=["video"])
+logger = logging.getLogger(__name__)
+
+
+def _local_address_for_drone(remote_host: str) -> str | None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route_socket:
+            # UDP connect selects the route without sending a datagram.
+            route_socket.connect((remote_host, 8889))
+            local_host = route_socket.getsockname()[0]
+    except OSError as error:
+        logger.warning(
+            "Unable to determine local WebRTC address for Tello host %s: %s",
+            remote_host,
+            error,
+        )
+        return None
+
+    address = ipaddress.ip_address(local_host)
+    if address.is_loopback or address.is_unspecified:
+        return None
+    return local_host
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 async def _log_stream_failure(drone_manager, command: str, error: Exception) -> None:
@@ -41,6 +74,12 @@ async def video_webrtc_offer(request: Request, body: WebRTCOffer):
     public_host = settings.webrtc_public_host or origin_host or request.url.hostname
     if not public_host:
         raise HTTPException(status_code=400, detail="Unable to determine WebRTC host")
+    if (
+        not settings.webrtc_public_host
+        and not settings.use_mock_drone
+        and _is_loopback_host(public_host)
+    ):
+        public_host = _local_address_for_drone(settings.tello_host) or public_host
 
     try:
         answer = await service.create_answer(body.sdp, public_host)

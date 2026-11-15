@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.config import settings
 from app.models.video import WebRTCIceServer
+from app.routers import video as video_router
 
 
 def test_stream_start_requires_connection(test_client: TestClient):
@@ -106,6 +107,52 @@ def test_webrtc_offer_uses_browser_origin_host(test_client: TestClient, monkeypa
 
     assert resp.status_code == 200
     create_answer.assert_awaited_once_with("browser-offer", "controller.local")
+
+
+def test_webrtc_offer_uses_tello_route_for_localhost_origin(
+    test_client: TestClient, monkeypatch
+):
+    service = test_client.app.state.webrtc_service
+    create_answer = AsyncMock(
+        return_value={"sdp": "browser-answer", "type": "answer", "peer_id": "peer-1"}
+    )
+    monkeypatch.setattr(service, "create_answer", create_answer)
+    monkeypatch.setattr(settings, "webrtc_public_host", None)
+    monkeypatch.setattr(settings, "use_mock_drone", False)
+    monkeypatch.setattr(settings, "tello_host", "192.168.10.1")
+    monkeypatch.setattr(
+        video_router, "_local_address_for_drone", lambda host: "192.168.10.2"
+    )
+
+    resp = test_client.post(
+        "/api/video/webrtc/offer",
+        json={"sdp": "browser-offer", "type": "offer"},
+        headers={"Origin": "http://localhost:5173"},
+    )
+
+    assert resp.status_code == 200
+    create_answer.assert_awaited_once_with("browser-offer", "192.168.10.2")
+
+
+def test_local_address_for_drone_uses_outbound_route(monkeypatch):
+    class RouteSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def connect(self, address):
+            self.remote_address = address
+
+        def getsockname(self):
+            return "192.168.10.2", 8889
+
+    monkeypatch.setattr(
+        video_router.socket, "socket", lambda *_args: RouteSocket()
+    )
+
+    assert video_router._local_address_for_drone("192.168.10.1") == "192.168.10.2"
 
 
 def test_webrtc_peer_can_be_closed(test_client: TestClient, monkeypatch):
