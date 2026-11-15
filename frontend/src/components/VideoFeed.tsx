@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { closeWebRtcPeer, createWebRtcOffer, getWebRtcConfiguration } from '@/lib/api';
 import { useDroneStore } from '@/stores/droneStore';
+import VisionOverlay from '@/components/VisionOverlay';
 
 type FeedState = 'loading' | 'active' | 'error';
 
@@ -171,6 +172,8 @@ export default function VideoFeed() {
         className="fixed inset-0 z-0 h-full w-full object-cover"
         onPlaying={() => setState('active')}
       />
+
+      {state === 'active' && <VisionOverlay />}
 
       {state === 'loading' && (
         <div className="fixed inset-0 z-0 flex items-center justify-center bg-black">

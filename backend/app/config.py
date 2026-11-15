@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     vision_model_path: Path | None = None
     vision_device: Literal["auto", "cpu", "cuda", "mps"] = "auto"
     vision_inference_hz: float = Field(default=5.0, gt=0, le=30)
+    vision_confidence_threshold: float = Field(default=0.25, ge=0, le=1)
+    vision_class_names: list[str] = Field(default_factory=list)
+    vision_model_format: Literal["auto", "yolov8", "yolov10"] = "auto"
 
     # Mock mode (for development/testing without a physical drone)
     use_mock_drone: bool = False

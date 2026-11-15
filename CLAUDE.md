@@ -84,7 +84,8 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 │   │   ├── services/
 │   │   │   ├── drone_manager.py    # Singleton Tello wrapper + asyncio.Lock + MockTello
 │   │   │   ├── telemetry_service.py # Background 4Hz polling + pub-sub broadcasting
-│   │   │   └── vision_service.py   # Latest-frame, off-loop detector runtime
+│   │   │   ├── vision_service.py   # Latest-frame, off-loop detector runtime
+│   │   │   └── yolo_detector.py    # YOLOv8/v10 ONNX inference via OpenCV DNN
 │   │   └── models/
 │   │       ├── commands.py         # Pydantic request/response schemas with validation
 │   │       └── telemetry.py        # Telemetry data models
@@ -107,6 +108,7 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 - **Video via WebRTC**. The browser exchanges SDP over HTTP with FastAPI; the backend streams captured frames over UDP.
 - **Telemetry via WebSocket push** at ~4 Hz from a background polling task — not client-polled.
 - **Vision inference** runs only when a detector is provided, operates on copied latest frames off the event loop, and publishes normalized results over the telemetry WebSocket.
+- **Object detection** loads an optional YOLOv8/v10 ONNX model through OpenCV DNN; the frontend overlays fresh normalized detections on the WebRTC video.
 - **Docker networking**: Uses standard bridge networking. Frontend Nginx proxies to backend via Docker DNS (`http://backend:8000`). For real drone on Linux, add `network_mode: host` to backend service.
 - **No authentication** in v1 — the app runs on the Tello's isolated Wi-Fi network.
 - **CORS**: Backend allows `http://localhost:3000` and `http://localhost:5173`.

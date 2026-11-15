@@ -5,6 +5,7 @@ services:
     env_file: .env
     volumes:
       - backend-data:/app/data
+      - ${TELLO_VISION_MODEL_DIR:-./models}:/models:ro
     sysctls:
       net.ipv4.ip_local_port_range: "40000 40100"
     ports:

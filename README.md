@@ -212,9 +212,11 @@ For networks that need ICE traversal, set `TELLO_WEBRTC_ICE_SERVERS` to a JSON a
 
 ## Vision Runtime
 
-The Phase 2 foundation adds a backend service that snapshots the latest drone frame and runs one detector at a time off the FastAPI event loop. It publishes timestamped results over the existing telemetry WebSocket using normalized bounding-box coordinates. It remains idle until a detector is supplied by the object-detection integration; no model package or weights are bundled.
+The backend runs one YOLOv8/YOLOv10 ONNX detector at a time against copied snapshots of the latest drone frame, off the FastAPI event loop. Timestamped detections are published over the existing telemetry WebSocket using normalized bounding-box coordinates and drawn over the WebRTC video. Stale results are hidden after 1.5 seconds. Model weights are not bundled.
 
-Configure `TELLO_VISION_MODEL_PATH` for the model integration, `TELLO_VISION_DEVICE` (`auto`, `cpu`, `cuda`, or `mps`), and `TELLO_VISION_INFERENCE_HZ` (default `5.0`, maximum `30`). The service does not queue frames while inference runs, so it resumes with a fresh frame instead of processing stale video.
+Export weights in a separate model-preparation environment with Ultralytics installed, for example `yolo export model=yolov8n.pt format=onnx imgsz=640`. For Docker, put the ONNX file in `./models`, set `TELLO_VISION_MODEL_PATH=/models/yolov8n.onnx`, and restart the backend. Standalone backend runs can point `TELLO_VISION_MODEL_PATH` at the local ONNX file. The built-in detector supports Ultralytics YOLOv8 raw detection outputs and YOLOv10 end-to-end outputs exported for a 640x640 input. `TELLO_VISION_MODEL_FORMAT=auto` detects standard COCO outputs; explicitly set it to `yolov8` or `yolov10` for custom models whose output shapes are ambiguous. Standard COCO labels are used by default; set `TELLO_VISION_CLASS_NAMES` to a JSON string array for custom models.
+
+`TELLO_VISION_DEVICE=auto` uses CUDA only when both the OpenCV DNN build and a CUDA device are available, otherwise it uses CPU. `cpu` and `cuda` can be selected explicitly; CUDA selection fails during startup if unavailable. The built-in OpenCV detector does not support MPS or Edge TPU. CUDA in Docker also requires a CUDA-enabled OpenCV build and GPU access in the container. `TELLO_VISION_INFERENCE_HZ` defaults to `5.0` and is capped at `30`; `TELLO_VISION_CONFIDENCE_THRESHOLD` defaults to `0.25`. The service does not queue frames while inference runs, so it resumes with a fresh frame instead of processing stale video.
 
 ## Gamepad Control
 
@@ -294,7 +296,7 @@ A roadmap of where this project could go, roughly ordered from most practical to
 ### Phase 2 — Computer Vision
 
 - **Vision Runtime Foundation** *(implemented)* — Add a configurable, latest-frame inference service and normalized WebSocket results
-- **Object Detection Overlay** — Run YOLOv8/v10 on the video stream (on the ground station GPU or via edge TPU) and draw bounding boxes on the HUD
+- **Object Detection Overlay** *(implemented)* — Run configurable YOLOv8/v10 ONNX inference and draw fresh, normalized detections over the video HUD; see [Vision Runtime](#vision-runtime)
 - **Face / Person Tracking** — Detect a target and auto-generate RC commands to keep them centered in frame — "follow me" mode
 - **Optical Flow & SLAM** — Estimate drone position drift without GPS using visual odometry, display estimated position on a 2D minimap
 - **QR / ArUco Marker Navigation** — Place markers as waypoints; drone reads them mid-flight to self-correct position

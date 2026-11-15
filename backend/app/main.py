@@ -10,6 +10,7 @@ from app.services.drone_manager import DroneManager
 from app.services.flight_log_service import FlightLogService
 from app.services.telemetry_service import TelemetryService
 from app.services.vision_service import VisionService
+from app.services.yolo_detector import YoloOnnxDetector
 from app.services.webrtc_service import WebRTCService
 
 logging.basicConfig(level=logging.INFO)
@@ -22,12 +23,23 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Tello Web Controller backend...")
     dm = DroneManager()
     ts = TelemetryService(dm)
+    vision_detector = (
+        YoloOnnxDetector(
+            settings.vision_model_path,
+            device=settings.vision_device,
+            class_names=settings.vision_class_names,
+            confidence_threshold=settings.vision_confidence_threshold,
+            model_format=settings.vision_model_format,
+        )
+        if settings.vision_model_path is not None
+        else None
+    )
     vision_service = VisionService(
         dm,
-        detector=None,
+        detector=vision_detector,
         inference_hz=settings.vision_inference_hz,
         model_path=settings.vision_model_path,
-        device=settings.vision_device,
+        device=vision_detector.device if vision_detector else settings.vision_device,
     )
     webrtc_service = WebRTCService(
         dm,
