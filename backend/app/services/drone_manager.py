@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from time import monotonic
 from typing import Any, Callable
 
 from app.config import settings
@@ -16,6 +17,10 @@ class DroneNotConnectedError(Exception):
 
 
 class DroneNotFlyingError(Exception):
+    pass
+
+
+class DroneCommandBusyError(Exception):
     pass
 
 
@@ -37,6 +42,7 @@ class MockTello:
         self._barometer = 0.0
         self._temp_high = 65.0
         self._temp_low = 60.0
+        self.last_rc_control = (0, 0, 0, 0)
 
     def _reset_flight_state(self) -> None:
         self._flying = False
@@ -106,6 +112,13 @@ class MockTello:
     def rotate_counter_clockwise(self, x: int) -> None:
         self._yaw = (self._yaw - x) % 360
         logger.info("MockTello: rotate_ccw %ddeg", x)
+
+    def send_rc_control(self, lr: int, fb: int, ud: int, yaw: int) -> None:
+        self.last_rc_control = (lr, fb, ud, yaw)
+        self._speed_x = lr
+        self._speed_y = fb
+        self._speed_z = ud
+        logger.info("MockTello: rc_control %s", self.last_rc_control)
 
     # -- Telemetry getters (matching djitellopy.Tello API) --
 
@@ -203,6 +216,8 @@ class DroneManager:
         self._streaming: bool = False
         self._frame_read: Any | None = None
         self._command_log_callbacks: list[Callable] = []
+        self._last_rc_control = (0, 0, 0, 0)
+        self._last_rc_control_at = 0.0
 
     # -- Properties --
 
@@ -270,10 +285,32 @@ class DroneManager:
 
     # -- Core execute method --
 
-    async def execute(self, fn: Callable, *args: Any) -> Any:
+    async def execute(
+        self, fn: Callable, *args: Any, reset_rc: bool = False
+    ) -> Any:
         """Execute a blocking djitellopy method with lock serialization."""
         async with self._lock:
+            if reset_rc and self._last_rc_control != (0, 0, 0, 0):
+                await self._send_rc_control_locked((0, 0, 0, 0))
+                self._last_rc_control = (0, 0, 0, 0)
+                await self._broadcast_command_log(
+                    "rc_control",
+                    {"lr": 0, "fb": 0, "ud": 0, "yaw": 0},
+                    "ok",
+                )
             return await asyncio.to_thread(fn, *args)
+
+    async def _send_rc_control_locked(
+        self, values: tuple[int, int, int, int]
+    ) -> None:
+        interval = float(
+            getattr(self._tello, "TIME_BTW_RC_CONTROL_COMMANDS", 0.1)
+        )
+        delay = interval - (monotonic() - self._last_rc_control_at)
+        if delay > 0:
+            await asyncio.sleep(delay)
+        await asyncio.to_thread(self._tello.send_rc_control, *values)
+        self._last_rc_control_at = monotonic()
 
     # -- Connection --
 
@@ -300,6 +337,8 @@ class DroneManager:
         if not self._connected:
             return {"ok": True, "status": "already_disconnected"}
 
+        await self._reset_rc_control()
+
         if self._streaming:
             try:
                 await self.execute(self._tello.streamoff)
@@ -322,6 +361,7 @@ class DroneManager:
         await self.execute(self._tello.end)
         self._connected = False
         self._tello = None
+        self._last_rc_control = (0, 0, 0, 0)
         await self._broadcast_command_log("disconnect", {}, "ok")
         return {"ok": True, "status": "disconnected"}
 
@@ -336,16 +376,62 @@ class DroneManager:
 
     async def land(self) -> dict:
         self._require_connected()
-        await self.execute(self._tello.land)
+        await self.execute(self._tello.land, reset_rc=True)
         self._flying = False
+        self._last_rc_control = (0, 0, 0, 0)
         await self._broadcast_command_log("land", {}, "ok")
         return {"ok": True, "message": "Landing successful"}
+
+    async def send_rc_control(self, lr: int, fb: int, ud: int, yaw: int) -> dict:
+        self._require_connected()
+        values = (lr, fb, ud, yaw)
+        if any(value < -100 or value > 100 for value in values):
+            raise ValueError("RC control values must be between -100 and 100")
+        if values != (0, 0, 0, 0):
+            self._require_flying()
+        if self._lock.locked():
+            raise DroneCommandBusyError("Another drone command is in progress")
+
+        async with self._lock:
+            await self._send_rc_control_locked(values)
+        if values != self._last_rc_control:
+            self._last_rc_control = values
+            await self._broadcast_command_log(
+                "rc_control",
+                {"lr": lr, "fb": fb, "ud": ud, "yaw": yaw},
+                "ok",
+            )
+        return {"ok": True, "message": "RC control sent"}
+
+    async def _reset_rc_control(self) -> None:
+        if self._last_rc_control == (0, 0, 0, 0) or not self._tello:
+            return
+        values = (0, 0, 0, 0)
+        try:
+            async with self._lock:
+                await self._send_rc_control_locked(values)
+        except Exception as e:
+            logger.warning("Failed to reset RC control: %s", e)
+            await self._broadcast_command_log(
+                "rc_control",
+                {"lr": 0, "fb": 0, "ud": 0, "yaw": 0},
+                "error",
+                str(e),
+            )
+        else:
+            self._last_rc_control = values
+            await self._broadcast_command_log(
+                "rc_control",
+                {"lr": 0, "fb": 0, "ud": 0, "yaw": 0},
+                "ok",
+            )
 
     async def emergency(self) -> dict:
         """Emergency stop — bypasses the lock for instant response."""
         if self._tello:
             await asyncio.to_thread(self._tello.emergency)
             self._flying = False
+            self._last_rc_control = (0, 0, 0, 0)
         await self._broadcast_command_log("emergency", {}, "ok")
         return {"ok": True, "message": "Emergency stop executed"}
 
@@ -363,7 +449,7 @@ class DroneManager:
             MoveDirection.down: self._tello.move_down,
         }
         fn = method_map[direction]
-        await self.execute(fn, distance_cm)
+        await self.execute(fn, distance_cm, reset_rc=True)
         await self._broadcast_command_log(
             "move", {"direction": direction.value, "distance_cm": distance_cm}, "ok"
         )
@@ -375,9 +461,13 @@ class DroneManager:
         self._require_connected()
         self._require_flying()
         if direction == RotateDirection.cw:
-            await self.execute(self._tello.rotate_clockwise, angle_deg)
+            await self.execute(
+                self._tello.rotate_clockwise, angle_deg, reset_rc=True
+            )
         else:
-            await self.execute(self._tello.rotate_counter_clockwise, angle_deg)
+            await self.execute(
+                self._tello.rotate_counter_clockwise, angle_deg, reset_rc=True
+            )
         await self._broadcast_command_log(
             "rotate", {"direction": direction.value, "angle_deg": angle_deg}, "ok"
         )

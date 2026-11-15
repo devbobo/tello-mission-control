@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Plane, Play } from 'lucide-react';
+import { Gamepad2, Plane, Play } from 'lucide-react';
 import { useDroneStore } from '@/stores/droneStore';
 import * as api from '@/lib/api';
+import { useGamepadControl } from '@/hooks/useGamepadControl';
 
 interface ActionButtonsProps {
   onOpenSequences?: () => void;
@@ -18,6 +19,7 @@ export default function ActionButtons({ onOpenSequences }: ActionButtonsProps) {
   } = useDroneStore();
 
   const [sequenceModalOpen, setSequenceModalOpen] = useState(false);
+  const gamepad = useGamepadControl();
 
   const isRunning = sequenceProgress?.status === 'running';
 
@@ -63,7 +65,7 @@ export default function ActionButtons({ onOpenSequences }: ActionButtonsProps) {
   }
 
   return (
-    <div className="hud-panel animate-fade-in-up flex items-center gap-3">
+    <div className="hud-panel animate-fade-in-up flex flex-wrap items-center gap-2 sm:gap-3">
       {/* Takeoff — primary action, slightly larger */}
       <button
         className="control-btn border-ok text-ok hover:bg-ok/20 px-4 py-2.5 sm:px-6 sm:py-3.5 shadow-[0_0_12px_rgba(0,212,106,0.15)]"
@@ -96,12 +98,38 @@ export default function ActionButtons({ onOpenSequences }: ActionButtonsProps) {
       {/* Sequences */}
       <button
         className="control-btn border-hud-secondary/30 text-hud-secondary px-3 py-2.5 sm:px-4 sm:py-3"
-        disabled={!isFlying || isRunning}
+        disabled={!isFlying || isRunning || gamepad.enabled}
         onClick={handleOpenSequences}
       >
         <Play size={18} />
         Sequences
       </button>
+
+      <div className="flex flex-col items-center">
+        <button
+          className={`control-btn px-2.5 py-2.5 sm:px-3 ${
+            gamepad.enabled ? 'border-info text-info' : 'text-hud-secondary'
+          }`}
+          disabled={!gamepad.canEnable}
+          onClick={gamepad.toggle}
+          aria-label={gamepad.enabled ? 'Disable gamepad control' : 'Enable gamepad control'}
+          title={gamepad.status}
+        >
+          <Gamepad2 size={18} />
+          <span className="hidden sm:inline">Gamepad</span>
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              gamepad.deadmanHeld ? 'bg-ok' : gamepad.enabled ? 'bg-caution' : 'bg-hud-dim'
+            }`}
+          />
+        </button>
+        {gamepad.enabled && (
+          <span className="mt-1 max-w-[120px] text-center text-[9px] leading-tight text-hud-secondary">
+            {gamepad.deadmanHeld ? 'RC active — release A/Cross to stop' : 'Hold A/Cross to fly'}
+          </span>
+        )}
+        <span className="sr-only" aria-live="polite">{gamepad.status}</span>
+      </div>
     </div>
   );
 }

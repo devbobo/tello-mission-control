@@ -4,9 +4,14 @@ from app.models.commands import (
     CommandResponse,
     ConnectResponse,
     MoveRequest,
+    RcControlRequest,
     RotateRequest,
 )
-from app.services.drone_manager import DroneNotConnectedError, DroneNotFlyingError
+from app.services.drone_manager import (
+    DroneCommandBusyError,
+    DroneNotConnectedError,
+    DroneNotFlyingError,
+)
 
 router = APIRouter(prefix="/api/control", tags=["control"])
 
@@ -142,3 +147,23 @@ async def rotate(request: Request, body: RotateRequest):
             e,
         )
         raise HTTPException(status_code=500, detail=f"Rotate failed: {e}")
+
+
+@router.post("/rc", response_model=CommandResponse)
+async def rc_control(request: Request, body: RcControlRequest):
+    dm = _get_dm(request)
+    params = body.model_dump()
+    try:
+        result = await dm.send_rc_control(body.lr, body.fb, body.ud, body.yaw)
+        return CommandResponse(**result)
+    except DroneCommandBusyError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except DroneNotConnectedError as e:
+        await _log_failure(request, "rc_control", params, e)
+        raise HTTPException(status_code=409, detail="Drone is not connected")
+    except DroneNotFlyingError as e:
+        await _log_failure(request, "rc_control", params, e)
+        raise HTTPException(status_code=409, detail="Drone is not flying")
+    except Exception as e:
+        await _log_failure(request, "rc_control", params, e)
+        raise HTTPException(status_code=500, detail=f"RC control failed: {e}")

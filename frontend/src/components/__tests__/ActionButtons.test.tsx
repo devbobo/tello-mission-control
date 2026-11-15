@@ -48,6 +48,11 @@ describe('ActionButtons', () => {
     expect(screen.getByText('Takeoff')).toBeDisabled();
   });
 
+  it('requires gamepad support and a connected controller before enabling it', () => {
+    render(<ActionButtons />);
+    expect(screen.getByRole('button', { name: 'Enable gamepad control' })).toBeDisabled();
+  });
+
   it('shows abort when sequence is running', () => {
     useDroneStore.setState({
       isFlying: true,

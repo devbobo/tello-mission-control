@@ -27,6 +27,13 @@ class RotateRequest(BaseModel):
     angle_deg: int = Field(..., ge=1, le=360, description="Angle in degrees (1-360)")
 
 
+class RcControlRequest(BaseModel):
+    lr: int = Field(..., ge=-100, le=100, description="Left/right velocity")
+    fb: int = Field(..., ge=-100, le=100, description="Forward/backward velocity")
+    ud: int = Field(..., ge=-100, le=100, description="Up/down velocity")
+    yaw: int = Field(..., ge=-100, le=100, description="Yaw velocity")
+
+
 class CommandResponse(BaseModel):
     ok: bool
     message: str = ""

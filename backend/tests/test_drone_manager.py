@@ -5,6 +5,7 @@ import pytest
 from app.models.commands import MoveDirection, RotateDirection
 from app.services.drone_manager import (
     DroneManager,
+    DroneCommandBusyError,
     DroneNotConnectedError,
     DroneNotFlyingError,
     MockTello,
@@ -143,6 +144,54 @@ async def test_rotate_requires_connected_and_flying(dm):
     await dm.connect()
     with pytest.raises(DroneNotFlyingError):
         await dm.rotate(RotateDirection.cw, 90)
+
+
+@pytest.mark.asyncio
+async def test_rc_control_requires_connected_and_flying(dm):
+    with pytest.raises(DroneNotConnectedError):
+        await dm.send_rc_control(1, 0, 0, 0)
+    await dm.connect()
+    with pytest.raises(DroneNotFlyingError):
+        await dm.send_rc_control(1, 0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_rc_control_updates_mock_and_resets_on_land(dm):
+    await dm.connect()
+    await dm.takeoff()
+    await dm.send_rc_control(40, -50, 20, -10)
+    assert dm.tello.last_rc_control == (40, -50, 20, -10)
+
+    await dm.land()
+    assert dm.tello.last_rc_control == (0, 0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_rc_control_is_neutralized_before_discrete_movement(dm):
+    await dm.connect()
+    await dm.takeoff()
+    await dm.send_rc_control(40, -50, 20, -10)
+
+    observed_rc = []
+    original_move_forward = dm.tello.move_forward
+
+    def move_forward(distance_cm):
+        observed_rc.append(dm.tello.last_rc_control)
+        original_move_forward(distance_cm)
+
+    dm.tello.move_forward = move_forward
+    await dm.move(MoveDirection.forward, 100)
+
+    assert observed_rc == [(0, 0, 0, 0)]
+
+
+@pytest.mark.asyncio
+async def test_rc_control_does_not_queue_behind_command_lock(dm):
+    await dm.connect()
+    await dm.takeoff()
+    async with dm._lock:
+        with pytest.raises(DroneCommandBusyError):
+            await dm.send_rc_control(1, 0, 0, 0)
 
 
 @pytest.mark.asyncio

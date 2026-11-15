@@ -12,12 +12,17 @@ import type {
 
 export const VIDEO_STREAM_URL = '/api/video/stream';
 
-async function post<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+async function post<T>(
+  path: string,
+  body?: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<T> {
   try {
     const res = await fetch(path, {
       method: 'POST',
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
     if (!res.ok) {
       const text = await res.text().catch(() => 'Unknown error');
@@ -74,7 +79,10 @@ export function flip(direction: FlipDirection): Promise<ApiResponse> {
 }
 
 export function sendRc(lr: number, fb: number, ud: number, yaw: number): Promise<ApiResponse> {
-  return post<ApiResponse>('/api/control/rc', { lr, fb, ud, yaw });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1000);
+  return post<ApiResponse>('/api/control/rc', { lr, fb, ud, yaw }, controller.signal)
+    .finally(() => clearTimeout(timeout));
 }
 
 export function getStatus(): Promise<StatusResponse> {

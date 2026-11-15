@@ -203,6 +203,14 @@ Docker Compose mounts a named volume at `/app/data` so the default database surv
 
 The read-only API is available at `GET /api/flights` and `GET /api/flights/{flight_id}/events`. Both endpoints support pagination; event pages are ordered chronologically.
 
+## Gamepad Control
+
+Connect a standard-mapped PS5 or Xbox controller, connect to the drone, and take off. Enable **Gamepad** in the flight controls, then hold **A/Cross (button 0)** as the dead-man control. Releasing it immediately sends neutral input. Only standard-mapped controllers with at least four axes are supported.
+
+The left stick controls left/right and forward/back; the right stick controls yaw and up/down. A 15% dead zone filters small stick movement. Control is disabled when the controller disconnects, the tab becomes hidden, the drone lands, or a sequence starts. Discrete movement commands neutralize RC input first.
+
+The backend exposes this control as `POST /api/control/rc` with integer `lr`, `fb`, `ud`, and `yaw` values, each bounded to `-100..100`. Non-neutral input requires a connected, flying drone. Use mock-drone mode to test the interface without hardware; gamepad commands can physically move a connected drone.
+
 ## MCP Server
 
 The MCP server exposes the existing backend API over stdio. Start the backend first, then configure your MCP client to launch `python -m app.mcp_server` from the `backend` directory. For Claude Desktop, use an absolute interpreter path and set `PYTHONPATH` to the absolute `backend` directory:
@@ -267,7 +275,7 @@ A roadmap of where this project could go, roughly ordered from most practical to
 
 - **MCP Server** *(implemented)* — Expose status and bounded drone control tools over stdio; see [MCP Server](#mcp-server)
 - **Flight Logging & Replay** *(implemented)* — Persist command outcomes and telemetry snapshots in SQLite with a read-only timeline in the UI; see [Flight History](#flight-history)
-- **Gamepad Support** — Map PS5/Xbox controllers via the Gamepad API to `send_rc_control()` for proper analog stick flying
+- **Gamepad Support** *(implemented)* — Map PS5/Xbox controllers via the Gamepad API to `send_rc_control()` for proper analog stick flying; see [Gamepad Control](#gamepad-control)
 - **WebRTC Video** — Replace MJPEG with WebRTC for lower latency, better compression, and future peer-to-peer streaming
 
 ### Phase 2 — Computer Vision
@@ -304,7 +312,7 @@ A roadmap of where this project could go, roughly ordered from most practical to
 - **Home Assistant Integration** — Trigger drone patrols from HA automations (e.g. "fly a perimeter check when motion is detected at night")
 - **3D Print Accessories** — Custom payload mounts, sensor brackets, and landing gear extensions
 
-> The MCP server and flight history now provide a foundation for agent-assisted control. Remaining Phase 1 work is gamepad support and WebRTC video.
+> The MCP server, flight history, and gamepad controls provide a foundation for agent-assisted control. Remaining Phase 1 work is WebRTC video.
 
 ## Challenges
 

@@ -23,7 +23,9 @@ export function useKeyboard() {
       // Emergency stop — always works regardless of state
       if (e.key === 'Escape') {
         e.preventDefault();
-        api.emergencyStop();
+        void api.emergencyStop().then((response) => {
+          if (response.ok) setIsFlying(false);
+        });
         return;
       }
 
