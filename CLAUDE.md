@@ -83,7 +83,8 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 │   │   │   └── status.py           # GET /api/status
 │   │   ├── services/
 │   │   │   ├── drone_manager.py    # Singleton Tello wrapper + asyncio.Lock + MockTello
-│   │   │   └── telemetry_service.py # Background 4Hz polling + pub-sub broadcasting
+│   │   │   ├── telemetry_service.py # Background 4Hz polling + pub-sub broadcasting
+│   │   │   └── vision_service.py   # Latest-frame, off-loop detector runtime
 │   │   └── models/
 │   │       ├── commands.py         # Pydantic request/response schemas with validation
 │   │       └── telemetry.py        # Telemetry data models
@@ -105,6 +106,7 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 - **Mock mode**: Set `TELLO_USE_MOCK_DRONE=true` to run without a physical drone. MockTello generates placeholder video frames and simulates all telemetry.
 - **Video via WebRTC**. The browser exchanges SDP over HTTP with FastAPI; the backend streams captured frames over UDP.
 - **Telemetry via WebSocket push** at ~4 Hz from a background polling task — not client-polled.
+- **Vision inference** runs only when a detector is provided, operates on copied latest frames off the event loop, and publishes normalized results over the telemetry WebSocket.
 - **Docker networking**: Uses standard bridge networking. Frontend Nginx proxies to backend via Docker DNS (`http://backend:8000`). For real drone on Linux, add `network_mode: host` to backend service.
 - **No authentication** in v1 — the app runs on the Tello's isolated Wi-Fi network.
 - **CORS**: Backend allows `http://localhost:3000` and `http://localhost:5173`.
@@ -116,7 +118,7 @@ cd frontend && npx vitest run                   # Frontend tests (CI mode)
 - REST: `POST /api/video/webrtc/offer`, `DELETE /api/video/webrtc/{peer_id}`, `POST /api/video/stream/{start,stop}`, `POST /api/video/snapshot`
 - REST: `GET /api/status` — `{ connected, flying, streaming, battery }`
 - REST: `GET /api/sequences` — stub, returns `[]`
-- WebSocket: `WS /api/ws/telemetry` — pushes telemetry frames (~4Hz) with `{battery, height, flight_time, temperature{high,low}, attitude{pitch,roll,yaw}, speed{x,y,z}, barometer, tof_distance}` and command log events
+- WebSocket: `WS /api/ws/telemetry` — pushes telemetry frames (~4Hz), command logs, and timestamped normalized vision results when a detector is configured
 
 ### Not yet implemented
 - `POST /api/control/{flip,rc}` (P1)

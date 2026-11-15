@@ -163,7 +163,7 @@ python -m pytest -v    # 54 tests, all use MockTello (no drone needed)
 | POST | `/api/video/snapshot` | Capture single JPEG frame |
 | GET | `/api/status` | `{connected, flying, streaming, battery}` |
 | GET | `/api/sequences` | List flight sequences (stub) |
-| WS | `/api/ws/telemetry` | Telemetry push (~4Hz) + command logs |
+| WS | `/api/ws/telemetry` | Telemetry (~4Hz), command logs, and vision results when enabled |
 
 ### Allowed Values
 
@@ -209,6 +209,12 @@ The browser sends an SDP offer to `POST /api/video/webrtc/offer`; the backend re
 In Docker Compose, UDP ports `40000-40100` are mapped to the backend and used for media. The backend advertises the browser's Origin host (or request host when Origin is absent) by default. Set `TELLO_WEBRTC_PUBLIC_HOST` when a reverse proxy or NAT requires a different browser-reachable address, and forward the configured UDP range to the backend. WebRTC requires direct UDP connectivity; opening only the HTTP/API port is not sufficient.
 
 For networks that need ICE traversal, set `TELLO_WEBRTC_ICE_SERVERS` to a JSON array of standard ICE server objects, for example `[{"urls":"stun:stun.example.org:3478"}]`. The same server configuration is returned to the browser and used by the backend. TURN credentials are sent to the browser, so use short-lived credentials rather than embedding permanent secrets in the frontend.
+
+## Vision Runtime
+
+The Phase 2 foundation adds a backend service that snapshots the latest drone frame and runs one detector at a time off the FastAPI event loop. It publishes timestamped results over the existing telemetry WebSocket using normalized bounding-box coordinates. It remains idle until a detector is supplied by the object-detection integration; no model package or weights are bundled.
+
+Configure `TELLO_VISION_MODEL_PATH` for the model integration, `TELLO_VISION_DEVICE` (`auto`, `cpu`, `cuda`, or `mps`), and `TELLO_VISION_INFERENCE_HZ` (default `5.0`, maximum `30`). The service does not queue frames while inference runs, so it resumes with a fresh frame instead of processing stale video.
 
 ## Gamepad Control
 
@@ -287,6 +293,7 @@ A roadmap of where this project could go, roughly ordered from most practical to
 
 ### Phase 2 — Computer Vision
 
+- **Vision Runtime Foundation** *(implemented)* — Add a configurable, latest-frame inference service and normalized WebSocket results
 - **Object Detection Overlay** — Run YOLOv8/v10 on the video stream (on the ground station GPU or via edge TPU) and draw bounding boxes on the HUD
 - **Face / Person Tracking** — Detect a target and auto-generate RC commands to keep them centered in frame — "follow me" mode
 - **Optical Flow & SLAM** — Estimate drone position drift without GPS using visual odometry, display estimated position on a 2D minimap

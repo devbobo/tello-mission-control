@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useDroneStore } from '@/stores/droneStore';
-import type { CommandLogEntry, SequenceProgress, TelemetryData, WsMessage } from '@/types/drone';
+import type { VisionFrame, WsMessage } from '@/types/drone';
 
 const MAX_BACKOFF = 16000;
 
@@ -8,6 +8,7 @@ export function useWebSocket() {
   const connectionStatus = useDroneStore((s) => s.connectionStatus);
   const previewMode = useDroneStore((s) => s.previewMode);
   const setTelemetry = useDroneStore((s) => s.setTelemetry);
+  const setVisionFrame = useDroneStore((s) => s.setVisionFrame);
   const addCommandLog = useDroneStore((s) => s.addCommandLog);
   const setSequenceProgress = useDroneStore((s) => s.setSequenceProgress);
   const setIsFlying = useDroneStore((s) => s.setIsFlying);
@@ -46,19 +47,24 @@ export function useWebSocket() {
 
           switch (msg.type) {
             case 'telemetry': {
-              const data = msg.data as TelemetryData;
-              setTelemetry(data);
+              setTelemetry(msg.data);
               // Infer flying state from height
-              if (data.height > 0) {
+              if (msg.data.height > 0) {
                 setIsFlying(true);
               }
               break;
             }
             case 'command_log':
-              addCommandLog(msg.data as CommandLogEntry);
+              addCommandLog(msg.data);
+              break;
+            case 'vision':
+              setVisionFrame({
+                data: msg.data,
+                timestamp: msg.timestamp,
+              } satisfies VisionFrame);
               break;
             case 'sequence_progress': {
-              const progress = msg.data as SequenceProgress;
+              const progress = msg.data;
               if (progress.status === 'completed' || progress.status === 'cancelled' || progress.status === 'error') {
                 // Clear progress after a brief delay so user sees final state
                 setSequenceProgress(progress);
@@ -102,5 +108,13 @@ export function useWebSocket() {
         reconnectTimerRef.current = null;
       }
     };
-  }, [connectionStatus, previewMode, setTelemetry, addCommandLog, setSequenceProgress, setIsFlying]);
+  }, [
+    connectionStatus,
+    previewMode,
+    setTelemetry,
+    setVisionFrame,
+    addCommandLog,
+    setSequenceProgress,
+    setIsFlying,
+  ]);
 }

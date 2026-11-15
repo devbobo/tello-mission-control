@@ -1,5 +1,12 @@
+import json
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+from app.models.vision import VisionDetection, VisionFrameData, VisionMessage
+from app.routers.telemetry import telemetry_ws
 
 
 def test_websocket_connect_and_receive(test_client: TestClient):
@@ -177,3 +184,71 @@ def test_multiple_telemetry_frames(test_client: TestClient):
                 break
 
         assert len(frames) >= 3, f"Expected at least 3 telemetry frames, got {len(frames)}"
+
+
+@pytest.mark.asyncio
+async def test_websocket_serializes_vision_messages():
+    class FakeService:
+        def __init__(self):
+            self.callback = None
+
+        def subscribe(self, callback):
+            self.callback = callback
+
+        def unsubscribe(self, callback):
+            assert callback == self.callback
+
+    class FakeDroneManager:
+        def add_command_log_callback(self, callback):
+            self.callback = callback
+
+        def remove_command_log_callback(self, callback):
+            assert callback == self.callback
+
+    class FakeWebSocket:
+        def __init__(self):
+            self.app = SimpleNamespace(
+                state=SimpleNamespace(
+                    telemetry_service=FakeService(),
+                    vision_service=FakeService(),
+                    drone_manager=FakeDroneManager(),
+                )
+            )
+            self.sent = []
+
+        async def accept(self):
+            pass
+
+        async def receive_text(self):
+            raise WebSocketDisconnect()
+
+        async def send_text(self, text):
+            self.sent.append(text)
+
+    websocket = FakeWebSocket()
+    await telemetry_ws(websocket)
+    message = VisionMessage(
+        data=VisionFrameData(
+            frame_id=1,
+            frame_width=960,
+            frame_height=720,
+            model="test-model",
+            device="cpu",
+            inference_ms=12.5,
+            detections=[
+                VisionDetection(
+                    label="person",
+                    confidence=0.8,
+                    x_min=0.1,
+                    y_min=0.2,
+                    x_max=0.5,
+                    y_max=0.7,
+                )
+            ],
+        ),
+        timestamp="2026-11-15T00:00:00Z",
+    )
+
+    await websocket.app.state.vision_service.callback(message)
+
+    assert json.loads(websocket.sent[0]) == json.loads(message.model_dump_json())

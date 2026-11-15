@@ -6,6 +6,7 @@ import type {
   Sequence,
   SequenceProgress,
   TelemetryData,
+  VisionFrame,
 } from '@/types/drone';
 import * as api from '@/lib/api';
 
@@ -27,6 +28,8 @@ interface DroneStore {
   // Telemetry
   telemetry: TelemetryData | null;
   setTelemetry: (data: TelemetryData) => void;
+  visionFrame: VisionFrame | null;
+  setVisionFrame: (frame: VisionFrame | null) => void;
 
   // Command log
   commandLog: CommandLogEntry[];
@@ -73,6 +76,8 @@ export const useDroneStore = create<DroneStore>((set, get) => ({
   // Telemetry
   telemetry: null,
   setTelemetry: (data) => set({ telemetry: data }),
+  visionFrame: null,
+  setVisionFrame: (frame) => set({ visionFrame: frame }),
 
   // Command log
   commandLog: [],
@@ -106,6 +111,7 @@ export const useDroneStore = create<DroneStore>((set, get) => ({
       previewMode: true,
       isFlying: false,
       telemetry: null,
+      visionFrame: null,
       commandLog: [],
       sequenceProgress: null,
     });
@@ -113,7 +119,7 @@ export const useDroneStore = create<DroneStore>((set, get) => ({
 
   // Connect to drone
   connect: async () => {
-    set({ connectionStatus: 'connecting' });
+    set({ connectionStatus: 'connecting', visionFrame: null });
     try {
       const res = await api.connectDrone();
       if (res.ok && res.battery !== undefined) {
@@ -156,6 +162,7 @@ export const useDroneStore = create<DroneStore>((set, get) => ({
       connectionStatus: 'disconnected',
       isFlying: false,
       telemetry: null,
+      visionFrame: null,
       sequenceProgress: null,
       commandPending: false,
       previewMode: false,

@@ -18,6 +18,7 @@ describe('droneStore', () => {
       isFlying: false,
       commandPending: false,
       telemetry: null,
+      visionFrame: null,
       commandLog: [],
       sequences: [],
       sequenceProgress: null,
@@ -64,6 +65,25 @@ describe('droneStore', () => {
       expect(useDroneStore.getState().commandLog).toHaveLength(200);
       // Should keep the latest entries
       expect(useDroneStore.getState().commandLog[199].command).toBe('cmd-209');
+    });
+
+    describe('vision frame', () => {
+      it('stores the latest vision result', () => {
+        const visionFrame = {
+          data: {
+            frame_id: 1,
+            frame_width: 640,
+            frame_height: 480,
+            model: 'test-model',
+            device: 'cpu',
+            inference_ms: 10,
+            detections: [],
+          },
+          timestamp: '2026-11-15T00:00:00Z',
+        };
+        useDroneStore.getState().setVisionFrame(visionFrame);
+        expect(useDroneStore.getState().visionFrame).toEqual(visionFrame);
+      });
     });
 
     it('clears log', () => {
@@ -142,6 +162,7 @@ describe('droneStore', () => {
       expect(state.previewMode).toBe(true);
       expect(state.isFlying).toBe(false);
       expect(state.telemetry).toBeNull();
+      expect(state.visionFrame).toBeNull();
     });
   });
 
@@ -167,6 +188,7 @@ describe('droneStore', () => {
       expect(state.isFlying).toBe(false);
       expect(state.commandPending).toBe(false);
       expect(state.telemetry).toBeNull();
+      expect(state.visionFrame).toBeNull();
       expect(state.sequenceProgress).toBeNull();
     });
 

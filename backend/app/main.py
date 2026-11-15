@@ -9,6 +9,7 @@ from app.routers import control, flights, sequences, status, telemetry, video
 from app.services.drone_manager import DroneManager
 from app.services.flight_log_service import FlightLogService
 from app.services.telemetry_service import TelemetryService
+from app.services.vision_service import VisionService
 from app.services.webrtc_service import WebRTCService
 
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +22,13 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Tello Web Controller backend...")
     dm = DroneManager()
     ts = TelemetryService(dm)
+    vision_service = VisionService(
+        dm,
+        detector=None,
+        inference_hz=settings.vision_inference_hz,
+        model_path=settings.vision_model_path,
+        device=settings.vision_device,
+    )
     webrtc_service = WebRTCService(
         dm,
         settings.video_fps,
@@ -34,8 +42,10 @@ async def lifespan(app: FastAPI):
     app.state.drone_manager = dm
     app.state.webrtc_service = webrtc_service
     app.state.telemetry_service = ts
+    app.state.vision_service = vision_service
     app.state.flight_log_service = flight_log_service
     await ts.start()
+    await vision_service.start()
     logger.info("Backend ready. Mock mode: %s", settings.use_mock_drone)
 
     yield
@@ -43,6 +53,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down...")
     await ts.stop()
+    await vision_service.stop()
     await webrtc_service.close_all()
     await dm.shutdown()
     await flight_log_service.stop()

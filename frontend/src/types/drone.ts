@@ -100,8 +100,32 @@ export interface WebRtcConfiguration {
   iceServers: WebRtcIceServer[];
 }
 
-export interface WsMessage {
-  type: 'telemetry' | 'command_log' | 'sequence_progress';
-  data: TelemetryData | CommandLogEntry | SequenceProgress;
-  timestamp?: string;
+export interface VisionDetection {
+  label: string;
+  confidence: number;
+  x_min: number;
+  y_min: number;
+  x_max: number;
+  y_max: number;
 }
+
+export interface VisionFrameData {
+  frame_id: number;
+  frame_width: number;
+  frame_height: number;
+  model: string;
+  device: string;
+  inference_ms: number;
+  detections: VisionDetection[];
+}
+
+export interface VisionFrame {
+  data: VisionFrameData;
+  timestamp: string;
+}
+
+export type WsMessage =
+  | { type: 'telemetry'; data: TelemetryData; timestamp: string }
+  | { type: 'vision'; data: VisionFrameData; timestamp: string }
+  | { type: 'command_log'; data: CommandLogEntry }
+  | { type: 'sequence_progress'; data: SequenceProgress };

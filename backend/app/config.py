@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -33,6 +34,11 @@ class Settings(BaseSettings):
     video_jpeg_quality: int = 70
     webrtc_public_host: str | None = None
     webrtc_ice_servers: list[WebRTCIceServer] = Field(default_factory=list)
+
+    # Computer vision
+    vision_model_path: Path | None = None
+    vision_device: Literal["auto", "cpu", "cuda", "mps"] = "auto"
+    vision_inference_hz: float = Field(default=5.0, gt=0, le=30)
 
     # Mock mode (for development/testing without a physical drone)
     use_mock_drone: bool = False
