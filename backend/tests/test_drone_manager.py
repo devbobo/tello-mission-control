@@ -1,4 +1,6 @@
 import asyncio
+import time
+from datetime import datetime, timezone
 
 import numpy as np
 import pytest
@@ -77,6 +79,31 @@ async def test_takeoff_sets_flying(dm):
     result = await dm.takeoff()
     assert result["ok"] is True
     assert dm.is_flying is True
+
+
+@pytest.mark.asyncio
+async def test_takeoff_log_timestamp_precedes_blocking_command_completion(dm):
+    await dm.connect()
+    entries = []
+
+    async def log_cb(entry):
+        entries.append(entry)
+
+    dm.add_command_log_callback(log_cb)
+    tello = dm.tello
+    original_takeoff = tello.takeoff
+    command_started_at = []
+
+    def slow_takeoff():
+        command_started_at.append(datetime.now(timezone.utc))
+        time.sleep(0.1)
+        original_takeoff()
+
+    tello.takeoff = slow_takeoff
+    await dm.takeoff()
+
+    logged_at = datetime.fromisoformat(entries[-1]["data"]["timestamp"])
+    assert logged_at <= command_started_at[0]
 
 
 @pytest.mark.asyncio

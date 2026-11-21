@@ -8,6 +8,67 @@ interface ActionButtonsProps {
   onOpenSequences?: () => void;
 }
 
+interface ReplayActionButtonsProps {
+  highlightedControls: string[];
+  result: 'ok' | 'error' | null;
+}
+
+export function ReplayActionButtons({
+  highlightedControls,
+  result,
+}: ReplayActionButtonsProps) {
+  const isHighlighted = (control: string) => highlightedControls.includes(control);
+  const highlightClass = (control: string) => {
+    if (!isHighlighted(control)) return '';
+    return result === 'error'
+      ? '!border-danger !text-danger !opacity-100 ring-2 ring-danger/80 shadow-[0_0_14px_rgba(255,59,48,0.4)]'
+      : '!border-info !text-info !opacity-100 ring-2 ring-info/80 shadow-[0_0_14px_rgba(0,212,255,0.4)]';
+  };
+
+  return (
+    <div className="hud-panel animate-fade-in-up flex flex-wrap items-center gap-2 sm:gap-3">
+      <button
+        type="button"
+        className={`control-btn border-ok text-ok px-4 py-2.5 sm:px-6 sm:py-3.5 shadow-[0_0_12px_rgba(0,212,106,0.15)] ${highlightClass('takeoff')}`}
+        disabled
+        data-replay-active={isHighlighted('takeoff') || undefined}
+        aria-label="Replay takeoff"
+      >
+        <Plane size={18} />
+        Takeoff
+      </button>
+      <button
+        type="button"
+        className={`control-btn border-info text-info px-3 py-2.5 sm:px-5 sm:py-3 ${highlightClass('land')}`}
+        disabled
+        data-replay-active={isHighlighted('land') || undefined}
+        aria-label="Replay land"
+      >
+        Land
+      </button>
+      <button
+        type="button"
+        className="control-btn border-hud-secondary/30 px-3 py-2.5 text-hud-secondary sm:px-4 sm:py-3"
+        disabled
+        aria-label="Sequences unavailable during replay"
+      >
+        <Play size={18} />
+        Sequences
+      </button>
+      <button
+        type="button"
+        className="control-btn px-2.5 py-2.5 text-hud-secondary sm:px-3"
+        disabled
+        aria-label="Gamepad unavailable during replay"
+      >
+        <Gamepad2 size={18} />
+        <span className="hidden sm:inline">Gamepad</span>
+        <span className="h-1.5 w-1.5 rounded-full bg-hud-dim" />
+      </button>
+    </div>
+  );
+}
+
 export default function ActionButtons({ onOpenSequences }: ActionButtonsProps) {
   const {
     isFlying,

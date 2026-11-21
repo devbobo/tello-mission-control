@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routers import control, flights, sequences, status, telemetry, video
+from app.services.auto_recording_service import AutoRecordingService
 from app.services.drone_manager import DroneManager
 from app.services.flight_log_service import FlightLogService
 from app.services.telemetry_service import TelemetryService
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Tello Web Controller backend...")
     dm = DroneManager()
     ts = TelemetryService(dm)
+    auto_recording_service = AutoRecordingService()
     webrtc_service = WebRTCService(
         dm,
         settings.video_fps,
@@ -31,7 +33,9 @@ async def lifespan(app: FastAPI):
     await flight_log_service.start()
     dm.add_command_log_callback(flight_log_service.handle_command_log)
     ts.subscribe(flight_log_service.record_telemetry)
+    ts.subscribe(auto_recording_service.handle_telemetry)
     app.state.drone_manager = dm
+    app.state.auto_recording_service = auto_recording_service
     app.state.webrtc_service = webrtc_service
     app.state.telemetry_service = ts
     app.state.flight_log_service = flight_log_service

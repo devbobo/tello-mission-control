@@ -14,6 +14,27 @@ describe('TelemetryPanel', () => {
     expect(dashes.length).toBeGreaterThanOrEqual(5);
   });
 
+  it('displays supplied historical telemetry', () => {
+    render(
+      <TelemetryPanel
+        telemetryOverride={{
+          battery: 42,
+          height: 75,
+          flight_time: 9,
+          temperature: { high: 65, low: 60 },
+          attitude: { pitch: 1, roll: -2, yaw: 30 },
+          speed: { x: 0, y: 0, z: 0 },
+          barometer: 75,
+          tof_distance: 75,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('42%')).toBeInTheDocument();
+    expect(screen.getByText('75 cm')).toBeInTheDocument();
+    expect(screen.getByText('0:09')).toBeInTheDocument();
+  });
+
   it('shows battery percentage', () => {
     useDroneStore.setState({
       telemetry: {

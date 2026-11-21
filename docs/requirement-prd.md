@@ -26,6 +26,7 @@ Controlling a DJI Tello drone currently requires writing and running Python scri
 - Expose live telemetry (battery, altitude, temperature, flight time, IMU) in a dashboard.
 - Stream the drone's camera feed to the browser in near real-time.
 - Allow users to execute both manual commands and pre-built flight routines (sequences).
+- Persist flight commands and telemetry, and replay them synchronized with recorded video.
 - Run entirely on a local network with zero cloud dependency.
 - Containerize with Docker for one-command setup.
 
@@ -33,7 +34,6 @@ Controlling a DJI Tello drone currently requires writing and running Python scri
 
 - Multi-drone swarm control.
 - Autonomous / AI-based flight (e.g. object tracking, path planning).
-- Persistent flight logging or database storage.
 - Mobile-native apps (responsive web is acceptable).
 - Authentication / multi-user access control.
 
@@ -110,6 +110,8 @@ Controlling a DJI Tello drone currently requires writing and running Python scri
 | ------ | ----------------------------------------------------------------------------------------------- | -------- |
 | FR-50  | All commands sent to the drone are logged with timestamp, command, and result (ok/error).       | P0       |
 | FR-51  | Command log is visible in a collapsible panel in the UI.                                        | P1       |
+| FR-52  | User can record and save one H.264 MP4 video for an active flight session.                       | P1       |
+| FR-53  | Flight history synchronizes recorded video playback with command events and telemetry snapshots. | P1     |
 
 ---
 

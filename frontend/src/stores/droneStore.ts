@@ -6,10 +6,13 @@ import type {
   Sequence,
   SequenceProgress,
   TelemetryData,
+  RecordingRequestAction,
 } from '@/types/drone';
 import * as api from '@/lib/api';
 
 const MAX_LOG_ENTRIES = 200;
+
+type RecordingRequestHandler = (action: RecordingRequestAction) => Promise<void>;
 
 interface DroneStore {
   // Connection
@@ -49,6 +52,10 @@ interface DroneStore {
   commandLogCollapsed: boolean;
   toggleCommandLog: () => void;
   previewMode: boolean;
+  recordingReady: boolean;
+  setRecordingReady: (ready: boolean) => void;
+  recordingRequestHandler: RecordingRequestHandler | null;
+  setRecordingRequestHandler: (handler: RecordingRequestHandler | null) => void;
 
   // Compound actions
   connect: () => Promise<void>;
@@ -98,12 +105,18 @@ export const useDroneStore = create<DroneStore>((set, get) => ({
   commandLogCollapsed: false,
   toggleCommandLog: () => set((s) => ({ commandLogCollapsed: !s.commandLogCollapsed })),
   previewMode: false,
+  recordingReady: false,
+  setRecordingReady: (ready) => set({ recordingReady: ready }),
+  recordingRequestHandler: null,
+  setRecordingRequestHandler: (handler) => set({ recordingRequestHandler: handler }),
 
   // Enter preview mode — shows HUD without drone connection
   enterPreview: () => {
     set({
       connectionStatus: 'connected',
       previewMode: true,
+      recordingReady: false,
+      recordingRequestHandler: null,
       isFlying: false,
       telemetry: null,
       commandLog: [],
@@ -159,6 +172,8 @@ export const useDroneStore = create<DroneStore>((set, get) => ({
       sequenceProgress: null,
       commandPending: false,
       previewMode: false,
+      recordingReady: false,
+      recordingRequestHandler: null,
     });
   },
 

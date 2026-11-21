@@ -93,10 +93,12 @@ tello-web-controller/
 │   │   │   ├── control.py            # POST /api/control/* endpoints
 │   │   │   ├── telemetry.py          # WS  /api/ws/telemetry
 │   │   │   ├── video.py              # WebRTC signaling, stream control, snapshots
+│       │   │   ├── flights.py            # Flight history and video replay endpoints
 │   │   │   └── sequences.py          # POST /api/sequences/*
 │   │   ├── services/
 │   │   │   ├── drone_manager.py      # Singleton Tello wrapper + command queue
 │   │   │   ├── telemetry_service.py  # Background telemetry polling loop
+│       │   │   ├── flight_log_service.py # SQLite events and recording metadata
 │   │   │   ├── video_service.py      # Frame capture → JPEG encoding
 │   │   │   └── sequence_runner.py    # Async sequence executor
 │   │   ├── models/
@@ -193,6 +195,11 @@ FastAPI App
 | POST   | `/api/sequences/{id}/run`    | Execute a sequence             | —                               | `{ ok, run_id }`          |
 | POST   | `/api/sequences/cancel`      | Cancel running sequence         | —                               | `{ ok }`                  |
 | GET    | `/api/status`                | Health check + drone state     | —                               | `{ connected, flying, battery }` |
+| GET    | `/api/flights`                | List saved flight sessions     | —                               | `[{ id, started_at, video_available, ... }]` |
+| GET    | `/api/flights/active`         | Get the active flight session  | —                               | `{ id, status, ... }` or `null` |
+| GET    | `/api/flights/{id}/events`    | Read paginated flight events   | —                               | `{ items, total, limit, offset }` |
+| PUT    | `/api/flights/{id}/video`     | Save session WebM recording    | WebM body + start time/duration | `{ ok }` |
+| GET    | `/api/flights/{id}/video`     | Play saved flight recording   | —                               | H.264 MP4 media |
 
 ### 5.2 WebSocket Endpoints
 
@@ -463,9 +470,8 @@ The `djitellopy` library can be mocked by replacing `Tello()` with a fake class 
 
 ## 12. Future Considerations (Out of Scope for v1)
 
-- **WebRTC video** — implemented for browser video streaming.
+- **TimescaleDB** — consider if deployment grows beyond local single-operator flight history and needs multi-user analytics.
 - **Gamepad support** — map physical game controllers to RC control.
-- **Flight recording & replay** — log all commands with timestamps for playback.
 - **3D visualization** — render the drone's position/attitude in a Three.js scene.
 - **Multi-drone (Swarm)** — leverage `djitellopy.Swarm` for Tello EDU fleets.
 - **Autonomous waypoints** — define GPS-less waypoint sequences using relative coordinates.

@@ -15,6 +15,9 @@ venv/
 .coverage
 htmlcov/
 
+# Local flight logs and recordings
+backend/data/
+
 # Node
 node_modules/
 npm-debug.log*

@@ -256,6 +256,7 @@ class DroneManager:
         params: dict,
         result: str,
         error: str | None = None,
+        occurred_at: datetime | None = None,
     ) -> None:
         entry = {
             "type": "command_log",
@@ -264,7 +265,7 @@ class DroneManager:
                 "params": params,
                 "result": result,
                 "error": error,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": (occurred_at or datetime.now(timezone.utc)).isoformat(),
             },
         }
         dead: list[Callable] = []
@@ -281,38 +282,49 @@ class DroneManager:
                 pass
 
     async def log_command_failure(
-        self, command: str, params: dict, error: str
+        self,
+        command: str,
+        params: dict,
+        error: str,
+        occurred_at: datetime | None = None,
     ) -> None:
-        await self._broadcast_command_log(command, params, "error", error)
+        await self._broadcast_command_log(
+            command, params, "error", error, occurred_at
+        )
 
     # -- Core execute method --
 
     async def execute(
         self, fn: Callable, *args: Any, reset_rc: bool = False
-    ) -> Any:
+    ) -> tuple[Any, datetime]:
         """Execute a blocking djitellopy method with lock serialization."""
         async with self._lock:
             if reset_rc and self._last_rc_control != (0, 0, 0, 0):
-                await self._send_rc_control_locked((0, 0, 0, 0))
+                rc_timestamp = await self._send_rc_control_locked((0, 0, 0, 0))
                 self._last_rc_control = (0, 0, 0, 0)
                 await self._broadcast_command_log(
                     "rc_control",
                     {"lr": 0, "fb": 0, "ud": 0, "yaw": 0},
                     "ok",
+                    occurred_at=rc_timestamp,
                 )
-            return await asyncio.to_thread(fn, *args)
+            command_timestamp = datetime.now(timezone.utc)
+            result = await asyncio.to_thread(fn, *args)
+            return result, command_timestamp
 
     async def _send_rc_control_locked(
         self, values: tuple[int, int, int, int]
-    ) -> None:
+    ) -> datetime:
         interval = float(
             getattr(self._tello, "TIME_BTW_RC_CONTROL_COMMANDS", 0.1)
         )
         delay = interval - (monotonic() - self._last_rc_control_at)
         if delay > 0:
             await asyncio.sleep(delay)
+        command_timestamp = datetime.now(timezone.utc)
         await asyncio.to_thread(self._tello.send_rc_control, *values)
         self._last_rc_control_at = monotonic()
+        return command_timestamp
 
     # -- Connection --
 
@@ -329,10 +341,12 @@ class DroneManager:
             self._tello = Tello(host=settings.tello_host)
             self._tello.RETRY_COUNT = settings.tello_retry_count
 
-        await self.execute(self._tello.connect)
+        _, command_timestamp = await self.execute(self._tello.connect)
         self._connected = True
         battery = await self.get_battery()
-        await self._broadcast_command_log("connect", {}, "ok")
+        await self._broadcast_command_log(
+            "connect", {}, "ok", occurred_at=command_timestamp
+        )
         return {"ok": True, "status": "connected", "battery": battery}
 
     async def disconnect(self) -> dict:
@@ -342,46 +356,62 @@ class DroneManager:
         await self._reset_rc_control()
 
         if self._streaming:
+            command_timestamp = datetime.now(timezone.utc)
             try:
-                await self.execute(self._tello.streamoff)
-                await self._broadcast_command_log("stream_off", {}, "ok")
+                _, command_timestamp = await self.execute(self._tello.streamoff)
+                await self._broadcast_command_log(
+                    "stream_off", {}, "ok", occurred_at=command_timestamp
+                )
             except Exception as e:
                 logger.warning("Failed to stop stream during disconnect: %s", e)
-                await self._broadcast_command_log("stream_off", {}, "error", str(e))
+                await self._broadcast_command_log(
+                    "stream_off", {}, "error", str(e), command_timestamp
+                )
             self._streaming = False
             self._frame_read = None
 
         if self._flying:
+            command_timestamp = datetime.now(timezone.utc)
             try:
-                await self.execute(self._tello.land)
-                await self._broadcast_command_log("land", {}, "ok")
+                _, command_timestamp = await self.execute(self._tello.land)
+                await self._broadcast_command_log(
+                    "land", {}, "ok", occurred_at=command_timestamp
+                )
             except Exception as e:
                 logger.warning("Failed to land during disconnect: %s", e)
-                await self._broadcast_command_log("land", {}, "error", str(e))
+                await self._broadcast_command_log(
+                    "land", {}, "error", str(e), command_timestamp
+                )
             self._flying = False
 
-        await self.execute(self._tello.end)
+        _, command_timestamp = await self.execute(self._tello.end)
         self._connected = False
         self._tello = None
         self._last_rc_control = (0, 0, 0, 0)
-        await self._broadcast_command_log("disconnect", {}, "ok")
+        await self._broadcast_command_log(
+            "disconnect", {}, "ok", occurred_at=command_timestamp
+        )
         return {"ok": True, "status": "disconnected"}
 
     # -- Flight commands --
 
     async def takeoff(self) -> dict:
         self._require_connected()
-        await self.execute(self._tello.takeoff)
+        _, command_timestamp = await self.execute(self._tello.takeoff)
         self._flying = True
-        await self._broadcast_command_log("takeoff", {}, "ok")
+        await self._broadcast_command_log(
+            "takeoff", {}, "ok", occurred_at=command_timestamp
+        )
         return {"ok": True, "message": "Takeoff successful"}
 
     async def land(self) -> dict:
         self._require_connected()
-        await self.execute(self._tello.land, reset_rc=True)
+        _, command_timestamp = await self.execute(self._tello.land, reset_rc=True)
         self._flying = False
         self._last_rc_control = (0, 0, 0, 0)
-        await self._broadcast_command_log("land", {}, "ok")
+        await self._broadcast_command_log(
+            "land", {}, "ok", occurred_at=command_timestamp
+        )
         return {"ok": True, "message": "Landing successful"}
 
     async def send_rc_control(self, lr: int, fb: int, ud: int, yaw: int) -> dict:
@@ -395,13 +425,14 @@ class DroneManager:
             raise DroneCommandBusyError("Another drone command is in progress")
 
         async with self._lock:
-            await self._send_rc_control_locked(values)
+            command_timestamp = await self._send_rc_control_locked(values)
         if values != self._last_rc_control:
             self._last_rc_control = values
             await self._broadcast_command_log(
                 "rc_control",
                 {"lr": lr, "fb": fb, "ud": ud, "yaw": yaw},
                 "ok",
+                occurred_at=command_timestamp,
             )
         return {"ok": True, "message": "RC control sent"}
 
@@ -411,7 +442,7 @@ class DroneManager:
         values = (0, 0, 0, 0)
         try:
             async with self._lock:
-                await self._send_rc_control_locked(values)
+                command_timestamp = await self._send_rc_control_locked(values)
         except Exception as e:
             logger.warning("Failed to reset RC control: %s", e)
             await self._broadcast_command_log(
@@ -426,15 +457,19 @@ class DroneManager:
                 "rc_control",
                 {"lr": 0, "fb": 0, "ud": 0, "yaw": 0},
                 "ok",
+                occurred_at=command_timestamp,
             )
 
     async def emergency(self) -> dict:
         """Emergency stop — bypasses the lock for instant response."""
+        command_timestamp = datetime.now(timezone.utc)
         if self._tello:
             await asyncio.to_thread(self._tello.emergency)
             self._flying = False
             self._last_rc_control = (0, 0, 0, 0)
-        await self._broadcast_command_log("emergency", {}, "ok")
+        await self._broadcast_command_log(
+            "emergency", {}, "ok", occurred_at=command_timestamp
+        )
         return {"ok": True, "message": "Emergency stop executed"}
 
     # -- Movement --
@@ -451,9 +486,12 @@ class DroneManager:
             MoveDirection.down: self._tello.move_down,
         }
         fn = method_map[direction]
-        await self.execute(fn, distance_cm, reset_rc=True)
+        _, command_timestamp = await self.execute(fn, distance_cm, reset_rc=True)
         await self._broadcast_command_log(
-            "move", {"direction": direction.value, "distance_cm": distance_cm}, "ok"
+            "move",
+            {"direction": direction.value, "distance_cm": distance_cm},
+            "ok",
+            occurred_at=command_timestamp,
         )
         return {"ok": True, "message": f"Moved {direction.value} {distance_cm}cm"}
 
@@ -463,15 +501,18 @@ class DroneManager:
         self._require_connected()
         self._require_flying()
         if direction == RotateDirection.cw:
-            await self.execute(
+            _, command_timestamp = await self.execute(
                 self._tello.rotate_clockwise, angle_deg, reset_rc=True
             )
         else:
-            await self.execute(
+            _, command_timestamp = await self.execute(
                 self._tello.rotate_counter_clockwise, angle_deg, reset_rc=True
             )
         await self._broadcast_command_log(
-            "rotate", {"direction": direction.value, "angle_deg": angle_deg}, "ok"
+            "rotate",
+            {"direction": direction.value, "angle_deg": angle_deg},
+            "ok",
+            occurred_at=command_timestamp,
         )
         return {"ok": True, "message": f"Rotated {direction.value} {angle_deg}°"}
 
@@ -481,20 +522,24 @@ class DroneManager:
         self._require_connected()
         if self._streaming:
             return {"ok": True, "message": "Stream already active"}
-        await self.execute(self._tello.streamon)
+        _, command_timestamp = await self.execute(self._tello.streamon)
         self._frame_read = await asyncio.to_thread(self._tello.get_frame_read)
         self._streaming = True
-        await self._broadcast_command_log("stream_on", {}, "ok")
+        await self._broadcast_command_log(
+            "stream_on", {}, "ok", occurred_at=command_timestamp
+        )
         return {"ok": True, "message": "Video stream started"}
 
     async def stream_off(self) -> dict:
         self._require_connected()
         if not self._streaming:
             return {"ok": True, "message": "Stream already stopped"}
-        await self.execute(self._tello.streamoff)
+        _, command_timestamp = await self.execute(self._tello.streamoff)
         self._frame_read = None
         self._streaming = False
-        await self._broadcast_command_log("stream_off", {}, "ok")
+        await self._broadcast_command_log(
+            "stream_off", {}, "ok", occurred_at=command_timestamp
+        )
         return {"ok": True, "message": "Video stream stopped"}
 
     def get_frame(self):

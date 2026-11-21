@@ -1,8 +1,14 @@
 import { useDroneStore } from '@/stores/droneStore';
 import { formatFlightTime, batteryBarColor } from '@/lib/format';
+import type { TelemetryData } from '@/types/drone';
 
-export default function TelemetryPanel() {
-  const telemetry = useDroneStore((s) => s.telemetry);
+interface TelemetryPanelProps {
+  telemetryOverride?: TelemetryData | null;
+}
+
+export default function TelemetryPanel({ telemetryOverride }: TelemetryPanelProps) {
+  const liveTelemetry = useDroneStore((s) => s.telemetry);
+  const telemetry = telemetryOverride === undefined ? liveTelemetry : telemetryOverride;
 
   const battery = telemetry?.battery ?? null;
   const height = telemetry?.height ?? null;

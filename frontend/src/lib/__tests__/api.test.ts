@@ -114,11 +114,67 @@ describe('api client', () => {
     expect(spy).toHaveBeenCalledWith('/api/flights?limit=100');
   });
 
+  it('getActiveFlight fetches the active flight session', async () => {
+    const spy = mockFetch(null);
+    await api.getActiveFlight();
+    expect(spy).toHaveBeenCalledWith('/api/flights/active');
+  });
+
   it('getFlightEvents fetches a paginated session timeline', async () => {
     const spy = mockFetch({ items: [], total: 0, limit: 25, offset: 10 });
     await api.getFlightEvents('flight-1', 25, 10);
     expect(spy).toHaveBeenCalledWith(
       '/api/flights/flight-1/events?limit=25&offset=10',
+    );
+  });
+
+  it('loads all event pages for synchronized playback', async () => {
+    const firstEvent = {
+      id: 1,
+      session_id: 'flight-1',
+      event_type: 'command' as const,
+      occurred_at: '2026-11-15T00:00:01Z',
+      command: 'takeoff',
+      params: {},
+      result: 'ok' as const,
+      error: null,
+      telemetry: null,
+    };
+    const nextEvent = { ...firstEvent, id: 2 };
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({
+        items: [nextEvent],
+        total: 2,
+        limit: 500,
+        offset: 1,
+      }),
+    } as Response);
+
+    const events = await api.getAllFlightEvents('flight-1', {
+      items: [firstEvent],
+      total: 2,
+      limit: 1,
+      offset: 0,
+    });
+
+    expect(events).toHaveLength(2);
+    expect(spy).toHaveBeenCalledWith('/api/flights/flight-1/events?limit=500&offset=1');
+  });
+
+  it('uploads a WebM recording with its timeline start and duration', async () => {
+    const spy = mockFetch({ ok: true }, true, 201);
+    const video = new Blob(['video'], { type: 'video/webm' });
+    await api.uploadFlightVideo('flight-1', video, '2026-11-15T00:00:00.000Z', 1500);
+
+    expect(spy).toHaveBeenCalledWith(
+      '/api/flights/flight-1/video?started_at=2026-11-15T00%3A00%3A00.000Z&duration_ms=1500',
+      expect.objectContaining({
+        method: 'PUT',
+        headers: { 'Content-Type': 'video/webm' },
+        body: video,
+      }),
     );
   });
 

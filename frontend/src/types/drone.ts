@@ -25,6 +25,9 @@ export interface FlightSession {
   ended_at: string | null;
   status: 'active' | 'completed' | 'interrupted';
   event_count: number;
+  video_available: boolean;
+  video_started_at: string | null;
+  video_duration_ms: number | null;
 }
 
 export interface FlightEvent {
@@ -100,8 +103,15 @@ export interface WebRtcConfiguration {
   iceServers: WebRtcIceServer[];
 }
 
-export interface WsMessage {
-  type: 'telemetry' | 'command_log' | 'sequence_progress';
-  data: TelemetryData | CommandLogEntry | SequenceProgress;
-  timestamp?: string;
+export type RecordingRequestAction = 'start' | 'stop';
+
+export interface RecordingRequest {
+  request_id: string;
+  action: RecordingRequestAction;
 }
+
+export type WsMessage =
+  | { type: 'telemetry'; data: TelemetryData; timestamp?: string }
+  | { type: 'command_log'; data: CommandLogEntry; timestamp?: string }
+  | { type: 'sequence_progress'; data: SequenceProgress; timestamp?: string }
+  | { type: 'recording_request'; data: RecordingRequest };
