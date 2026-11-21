@@ -28,6 +28,10 @@ class Settings(BaseSettings):
 
     # Flight history
     flight_log_db_path: Path = Path("data/flight_logs.sqlite3")
+    flight_video_max_bytes: int = Field(default=524_288_000, gt=0)
+    auto_record_on_takeoff: bool = False
+    auto_record_landing_speed_threshold_cm_s: float = Field(default=0, ge=0)
+    auto_record_landing_confirmation_samples: int = Field(default=8, ge=1)
 
     # Video
     video_fps: int = 30
@@ -49,7 +53,11 @@ class Settings(BaseSettings):
     # Mock mode (for development/testing without a physical drone)
     use_mock_drone: bool = False
 
-    model_config = {"env_prefix": "TELLO_"}
+    model_config = {
+        "env_prefix": "TELLO_",
+        "env_file": Path(__file__).resolve().parents[2] / ".env",
+        "extra": "ignore",
+    }
 
 
 settings = Settings()

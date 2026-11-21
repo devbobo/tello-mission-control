@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routers import control, flights, sequences, status, telemetry, video
+from app.services.auto_recording_service import AutoRecordingService
 from app.services.drone_manager import DroneManager
 from app.services.flight_log_service import FlightLogService
 from app.services.marker_service import MarkerDetectionService
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
         poll_hz=settings.vision_marker_hz,
         aruco_dictionary=settings.vision_aruco_dictionary,
     )
+    auto_recording_service = AutoRecordingService()
     webrtc_service = WebRTCService(
         dm,
         settings.video_fps,
@@ -62,7 +64,9 @@ async def lifespan(app: FastAPI):
     await flight_log_service.start()
     dm.add_command_log_callback(flight_log_service.handle_command_log)
     ts.subscribe(flight_log_service.record_telemetry)
+    ts.subscribe(auto_recording_service.handle_telemetry)
     app.state.drone_manager = dm
+    app.state.auto_recording_service = auto_recording_service
     app.state.webrtc_service = webrtc_service
     app.state.telemetry_service = ts
     app.state.vision_service = vision_service

@@ -2,6 +2,8 @@ import os
 
 # Force mock mode before any app imports
 os.environ["TELLO_USE_MOCK_DRONE"] = "true"
+# Keep general API tests independent of the developer's local recording setting.
+os.environ["TELLO_AUTO_RECORD_ON_TAKEOFF"] = "false"
 
 import pytest
 from fastapi.testclient import TestClient

@@ -207,6 +207,16 @@ async def test_websocket_serializes_vision_messages():
         def remove_command_log_callback(self, callback):
             assert callback == self.callback
 
+    class FakeAutoRecordingService:
+        def connect_recorder(self, _send):
+            return "recorder-1"
+
+        def handle_client_message(self, recorder_id, _message):
+            assert recorder_id == "recorder-1"
+
+        def disconnect_recorder(self, recorder_id):
+            assert recorder_id == "recorder-1"
+
     class FakeWebSocket:
         def __init__(self):
             self.app = SimpleNamespace(
@@ -216,6 +226,7 @@ async def test_websocket_serializes_vision_messages():
                     odometry_service=FakeService(),
                     marker_service=FakeService(),
                     drone_manager=FakeDroneManager(),
+                    auto_recording_service=FakeAutoRecordingService(),
                 )
             )
             self.sent = []

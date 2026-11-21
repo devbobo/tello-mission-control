@@ -131,6 +131,10 @@ export function getFlightSessions(): Promise<FlightSession[]> {
   return get<FlightSession[]>('/api/flights?limit=100');
 }
 
+export function getActiveFlight(): Promise<FlightSession | null> {
+  return get<FlightSession | null>('/api/flights/active');
+}
+
 export function getFlightEvents(
   flightId: string,
   limit = 100,
@@ -140,6 +144,56 @@ export function getFlightEvents(
   return get<FlightEventPage>(
     `/api/flights/${encodeURIComponent(flightId)}/events?${params.toString()}`,
   );
+}
+
+export async function getAllFlightEvents(
+  flightId: string,
+  initialPage?: FlightEventPage,
+): Promise<FlightEventPage['items']> {
+  const firstPage = initialPage ?? await getFlightEvents(flightId, 500, 0);
+  if (firstPage.total <= firstPage.items.length) return firstPage.items;
+
+  const pageOffsets = [];
+  for (let offset = firstPage.items.length; offset < firstPage.total; offset += 500) {
+    pageOffsets.push(offset);
+  }
+  const remainingPages = await Promise.all(
+    pageOffsets.map((offset) => getFlightEvents(flightId, 500, offset)),
+  );
+  return [...firstPage.items, ...remainingPages.flatMap((page) => page.items)];
+}
+
+export function getFlightVideoUrl(flightId: string): string {
+  return `/api/flights/${encodeURIComponent(flightId)}/video`;
+}
+
+export async function uploadFlightVideo(
+  flightId: string,
+  video: Blob,
+  startedAt: string,
+  durationMs: number,
+): Promise<void> {
+  const params = new URLSearchParams({
+    started_at: startedAt,
+    duration_ms: String(durationMs),
+  });
+  let response: Response;
+  try {
+    response = await fetch(
+      `/api/flights/${encodeURIComponent(flightId)}/video?${params.toString()}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': video.type || 'video/webm' },
+        body: video,
+      },
+    );
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Flight video upload failed');
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { detail?: string } | null;
+    throw new Error(body?.detail ?? `Flight video upload failed: HTTP ${response.status}`);
+  }
 }
 
 export function runSequence(id: string): Promise<ApiResponse> {

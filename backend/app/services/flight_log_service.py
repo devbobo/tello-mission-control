@@ -3,16 +3,33 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from fractions import Fraction
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any, AsyncIterator, Generator
 
+import av
+
+from app.config import settings
 from app.models.telemetry import TelemetryFrame
 
 logger = logging.getLogger(__name__)
+
+
+class FlightNotFoundError(Exception):
+    pass
+
+
+class FlightVideoAlreadyExistsError(Exception):
+    pass
+
+
+class FlightVideoTooLargeError(Exception):
+    pass
 
 
 class FlightLogService:
@@ -20,8 +37,10 @@ class FlightLogService:
 
     def __init__(self, database_path: Path) -> None:
         self._database_path = database_path
+        self._video_directory = database_path.parent / "flight_videos"
         self._session_id: str | None = None
         self._lock = asyncio.Lock()
+        self._video_lock = asyncio.Lock()
 
     async def start(self) -> None:
         await asyncio.to_thread(self._initialize_database)
@@ -111,10 +130,98 @@ class FlightLogService:
     async def list_sessions(self, limit: int, offset: int) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self._list_sessions, limit, offset)
 
+    async def get_active_session(self) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._get_active_session)
+
     async def list_events(
         self, session_id: str, limit: int, offset: int
     ) -> dict[str, Any] | None:
         return await asyncio.to_thread(self._list_events, session_id, limit, offset)
+
+    async def store_video(
+        self,
+        session_id: str,
+        started_at: datetime,
+        duration_ms: int,
+        chunks: AsyncIterator[bytes],
+    ) -> None:
+        session = await asyncio.to_thread(self._get_session_video_metadata, session_id)
+        if session is None:
+            raise FlightNotFoundError(session_id)
+        if session["video_path"] is not None:
+            raise FlightVideoAlreadyExistsError(session_id)
+
+        started_at = _as_utc(started_at)
+        session_started_at = _as_utc(datetime.fromisoformat(session["started_at"]))
+        if started_at < session_started_at:
+            raise ValueError("Video recording must start during its flight session")
+        if session["ended_at"] is not None:
+            session_ended_at = _as_utc(datetime.fromisoformat(session["ended_at"]))
+            if started_at > session_ended_at:
+                raise ValueError("Video recording must start during its flight session")
+
+        await asyncio.to_thread(self._video_directory.mkdir, parents=True, exist_ok=True)
+        temporary_path = self._video_directory / f".{uuid.uuid4().hex}.webm"
+        transcoded_path = self._video_directory / f".{uuid.uuid4().hex}.mp4"
+        size = 0
+        try:
+            async for chunk in chunks:
+                if not chunk:
+                    continue
+                size += len(chunk)
+                if size > settings.flight_video_max_bytes:
+                    raise FlightVideoTooLargeError(str(settings.flight_video_max_bytes))
+                await asyncio.to_thread(_append_file, temporary_path, chunk)
+
+            if size == 0:
+                raise ValueError("Uploaded video is empty")
+
+            await asyncio.to_thread(
+                _transcode_webm_to_mp4, temporary_path, transcoded_path
+            )
+            if transcoded_path.stat().st_size > settings.flight_video_max_bytes:
+                raise FlightVideoTooLargeError(str(settings.flight_video_max_bytes))
+
+            async with self._lock:
+                await asyncio.to_thread(
+                    self._attach_video,
+                    session_id,
+                    transcoded_path,
+                    started_at.isoformat(),
+                    duration_ms,
+                )
+        finally:
+            await asyncio.to_thread(temporary_path.unlink, missing_ok=True)
+            await asyncio.to_thread(transcoded_path.unlink, missing_ok=True)
+
+    async def get_video(self, session_id: str) -> tuple[Path, str] | None:
+        video = await asyncio.to_thread(self._get_video, session_id)
+        if video is None or not _is_webm(video[1]):
+            return video
+
+        async with self._video_lock:
+            video = await asyncio.to_thread(self._get_video, session_id)
+            if video is not None and _is_webm(video[1]):
+                source_path, _ = video
+                transcoded_path = self._video_directory / f".{uuid.uuid4().hex}.mp4"
+                try:
+                    await asyncio.to_thread(
+                        _transcode_webm_to_mp4, source_path, transcoded_path
+                    )
+                    if transcoded_path.stat().st_size > settings.flight_video_max_bytes:
+                        raise FlightVideoTooLargeError(
+                            str(settings.flight_video_max_bytes)
+                        )
+                    await asyncio.to_thread(
+                        self._replace_legacy_video,
+                        session_id,
+                        source_path,
+                        transcoded_path,
+                    )
+                finally:
+                    await asyncio.to_thread(transcoded_path.unlink, missing_ok=True)
+
+        return await asyncio.to_thread(self._get_video, session_id)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._database_path)
@@ -141,7 +248,11 @@ class FlightLogService:
                     id TEXT PRIMARY KEY,
                     started_at TEXT NOT NULL,
                     ended_at TEXT,
-                    status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'interrupted'))
+                    status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'interrupted')),
+                    video_path TEXT,
+                    video_started_at TEXT,
+                    video_duration_ms INTEGER,
+                    video_content_type TEXT
                 );
                 CREATE INDEX IF NOT EXISTS flight_sessions_started_at
                     ON flight_sessions(started_at DESC);
@@ -160,6 +271,20 @@ class FlightLogService:
                     ON flight_events(session_id, occurred_at, id);
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(flight_sessions)")
+            }
+            for name, column_type in (
+                ("video_path", "TEXT"),
+                ("video_started_at", "TEXT"),
+                ("video_duration_ms", "INTEGER"),
+                ("video_content_type", "TEXT"),
+            ):
+                if name not in columns:
+                    connection.execute(
+                        f"ALTER TABLE flight_sessions ADD COLUMN {name} {column_type}"
+                    )
             connection.execute(
                 """
                 UPDATE flight_sessions
@@ -168,6 +293,22 @@ class FlightLogService:
                 """,
                 (datetime.now(timezone.utc).isoformat(),),
             )
+            recorded_sessions = connection.execute(
+                """
+                SELECT id, video_started_at, video_duration_ms
+                FROM flight_sessions
+                WHERE video_path IS NOT NULL
+                  AND video_started_at IS NOT NULL
+                  AND video_duration_ms IS NOT NULL
+                """
+            ).fetchall()
+            for session in recorded_sessions:
+                self._insert_recording_events_on_connection(
+                    connection,
+                    session["id"],
+                    session["video_started_at"],
+                    session["video_duration_ms"],
+                )
 
     def _create_session_and_event(
         self,
@@ -236,6 +377,41 @@ class FlightLogService:
             ),
         )
 
+    @staticmethod
+    def _insert_recording_events_on_connection(
+        connection: sqlite3.Connection,
+        session_id: str,
+        started_at: str,
+        duration_ms: int,
+    ) -> None:
+        start_time = _as_utc(datetime.fromisoformat(started_at))
+        recording_events = (
+            ("recording_start", start_time),
+            ("recording_stop", start_time + timedelta(milliseconds=duration_ms)),
+        )
+        for command, timestamp in recording_events:
+            exists = connection.execute(
+                """
+                SELECT 1
+                FROM flight_events
+                WHERE session_id = ? AND event_type = 'command' AND command = ?
+                LIMIT 1
+                """,
+                (session_id, command),
+            ).fetchone()
+            if exists is None:
+                FlightLogService._insert_event_on_connection(
+                    connection,
+                    session_id,
+                    "command",
+                    timestamp.isoformat(),
+                    command,
+                    {},
+                    "ok",
+                    None,
+                    None,
+                )
+
     def _finish_session(self, session_id: str, timestamp: str) -> None:
         with self._connection() as connection:
             connection.execute(
@@ -251,7 +427,8 @@ class FlightLogService:
         with self._connection() as connection:
             rows = connection.execute(
                 """
-                SELECT s.id, s.started_at, s.ended_at, s.status, COUNT(e.id) AS event_count
+                SELECT s.id, s.started_at, s.ended_at, s.status, COUNT(e.id) AS event_count,
+                       s.video_path, s.video_started_at, s.video_duration_ms
                 FROM flight_sessions AS s
                 LEFT JOIN flight_events AS e ON e.session_id = s.id
                 GROUP BY s.id
@@ -260,7 +437,124 @@ class FlightLogService:
                 """,
                 (limit, offset),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._session_response(dict(row)) for row in rows]
+
+    def _get_active_session(self) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT s.id, s.started_at, s.ended_at, s.status, COUNT(e.id) AS event_count,
+                       s.video_path, s.video_started_at, s.video_duration_ms
+                FROM flight_sessions AS s
+                LEFT JOIN flight_events AS e ON e.session_id = s.id
+                WHERE s.status = 'active'
+                GROUP BY s.id
+                ORDER BY s.started_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        return self._session_response(dict(row)) if row is not None else None
+
+    def _session_response(self, session: dict[str, Any]) -> dict[str, Any]:
+        video_path = session.pop("video_path")
+        session["video_available"] = (
+            video_path is not None and (self._video_directory / video_path).is_file()
+        )
+        return session
+
+    def _get_session_video_metadata(self, session_id: str) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT started_at, ended_at, video_path
+                FROM flight_sessions
+                WHERE id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def _attach_video(
+        self,
+        session_id: str,
+        temporary_path: Path,
+        started_at: str,
+        duration_ms: int,
+    ) -> None:
+        stored_name = f"{uuid.uuid4().hex}.mp4"
+        stored_path = self._video_directory / stored_name
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT video_path FROM flight_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if row is None:
+                raise FlightNotFoundError(session_id)
+            if row["video_path"] is not None:
+                raise FlightVideoAlreadyExistsError(session_id)
+
+            os.replace(temporary_path, stored_path)
+            try:
+                connection.execute(
+                    """
+                    UPDATE flight_sessions
+                    SET video_path = ?, video_started_at = ?, video_duration_ms = ?,
+                        video_content_type = ?
+                    WHERE id = ?
+                    """,
+                    (stored_name, started_at, duration_ms, "video/mp4", session_id),
+                )
+                self._insert_recording_events_on_connection(
+                    connection, session_id, started_at, duration_ms
+                )
+            except Exception:
+                stored_path.unlink(missing_ok=True)
+                raise
+
+    def _replace_legacy_video(
+        self, session_id: str, source_path: Path, transcoded_path: Path
+    ) -> None:
+        stored_name = f"{uuid.uuid4().hex}.mp4"
+        stored_path = self._video_directory / stored_name
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT video_path FROM flight_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if row is None:
+                raise FlightNotFoundError(session_id)
+            if row["video_path"] != source_path.name:
+                return
+
+            os.replace(transcoded_path, stored_path)
+            try:
+                connection.execute(
+                    """
+                    UPDATE flight_sessions
+                    SET video_path = ?, video_content_type = 'video/mp4'
+                    WHERE id = ?
+                    """,
+                    (stored_name, session_id),
+                )
+            except Exception:
+                stored_path.unlink(missing_ok=True)
+                raise
+        source_path.unlink(missing_ok=True)
+
+    def _get_video(self, session_id: str) -> tuple[Path, str] | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT video_path, video_content_type
+                FROM flight_sessions
+                WHERE id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+        if row is None or row["video_path"] is None:
+            return None
+        path = self._video_directory / row["video_path"]
+        if not path.is_file():
+            return None
+        return path, row["video_content_type"] or "video/webm"
 
     def _list_events(
         self, session_id: str, limit: int, offset: int
@@ -295,3 +589,65 @@ class FlightLogService:
             event["telemetry"] = json.loads(telemetry_json) if telemetry_json else None
             events.append(event)
         return {"items": events, "total": total}
+
+
+def _append_file(path: Path, chunk: bytes) -> None:
+    with path.open("ab") as video_file:
+        video_file.write(chunk)
+
+
+def _transcode_webm_to_mp4(source_path: Path, destination_path: Path) -> None:
+    with av.open(str(source_path), mode="r") as source:
+        source_stream = next(
+            (stream for stream in source.streams if stream.type == "video"), None
+        )
+        if source_stream is None:
+            raise ValueError("Flight recording contains no video stream")
+
+        frame_rate = source_stream.average_rate
+        if frame_rate is None or frame_rate <= 0:
+            frame_rate = settings.video_fps
+        frame_rate = Fraction(frame_rate)
+        frame_time_base = Fraction(1, 1) / frame_rate
+
+        with av.open(
+            str(destination_path),
+            mode="w",
+            format="mp4",
+            options={"movflags": "+faststart"},
+        ) as output:
+            output_stream = output.add_stream("libx264", rate=frame_rate)
+            output_stream.width = source_stream.width
+            output_stream.height = source_stream.height
+            output_stream.pix_fmt = "yuv420p"
+            output_stream.bit_rate = 2_000_000
+
+            frame_count = 0
+            for frame in source.decode(source_stream):
+                timestamp = frame.time
+                frame.pts = (
+                    round(timestamp / float(frame_time_base))
+                    if timestamp is not None
+                    else frame_count
+                )
+                frame.time_base = frame_time_base
+                frame = frame.reformat(format="yuv420p")
+                for packet in output_stream.encode(frame):
+                    output.mux(packet)
+                frame_count += 1
+
+            if frame_count == 0:
+                raise ValueError("Flight recording contains no decodable video frames")
+
+            for packet in output_stream.encode():
+                output.mux(packet)
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        raise ValueError("Video timestamp must include a timezone")
+    return value.astimezone(timezone.utc)
+
+
+def _is_webm(content_type: str) -> bool:
+    return content_type.split(";", maxsplit=1)[0].strip().lower() == "video/webm"

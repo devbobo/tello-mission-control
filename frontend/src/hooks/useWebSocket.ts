@@ -9,6 +9,34 @@ import type {
 
 const MAX_BACKOFF = 16000;
 
+async function handleRecordingRequest(
+  ws: WebSocket,
+  request: Extract<WsMessage, { type: 'recording_request' }>['data'],
+) {
+  const handler = useDroneStore.getState().recordingRequestHandler;
+  let acknowledgement: { type: 'recording_ack'; data: { request_id: string; ok: boolean; error?: string } };
+  try {
+    if (!handler) throw new Error('The browser video recorder is unavailable');
+    await handler(request.action);
+    acknowledgement = {
+      type: 'recording_ack',
+      data: { request_id: request.request_id, ok: true },
+    };
+  } catch (error) {
+    acknowledgement = {
+      type: 'recording_ack',
+      data: {
+        request_id: request.request_id,
+        ok: false,
+        error: error instanceof Error ? error.message : 'Browser recording failed',
+      },
+    };
+  }
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(acknowledgement));
+  }
+}
+
 export function useWebSocket() {
   const connectionStatus = useDroneStore((s) => s.connectionStatus);
   const previewMode = useDroneStore((s) => s.previewMode);
@@ -46,6 +74,10 @@ export function useWebSocket() {
 
       ws.onopen = () => {
         backoffRef.current = 1000; // Reset backoff on success
+        ws.send(JSON.stringify({
+          type: 'recorder_status',
+          data: { ready: useDroneStore.getState().recordingReady },
+        }));
       };
 
       ws.onmessage = (event) => {
@@ -93,6 +125,9 @@ export function useWebSocket() {
               }
               break;
             }
+            case 'recording_request':
+              void handleRecordingRequest(ws, msg.data);
+              break;
           }
         } catch {
           // Ignore malformed messages
@@ -115,9 +150,21 @@ export function useWebSocket() {
       };
     }
 
+    const unsubscribeRecorderStatus = useDroneStore.subscribe((state, previousState) => {
+      if (state.recordingReady === previousState.recordingReady) return;
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'recorder_status',
+          data: { ready: state.recordingReady },
+        }));
+      }
+    });
+
     connect();
 
     return () => {
+      unsubscribeRecorderStatus();
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;

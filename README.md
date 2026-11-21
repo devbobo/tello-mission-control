@@ -188,6 +188,10 @@ All environment variables are prefixed with `TELLO_`. See `.env.template` for th
 | `TELLO_MCP_REQUEST_TIMEOUT` | `10.0` | MCP-to-backend request timeout in seconds |
 | `TELLO_TELEMETRY_POLL_HZ` | `4.0` | Telemetry polling frequency |
 | `TELLO_FLIGHT_LOG_DB_PATH` | `data/flight_logs.sqlite3` | SQLite database for flight sessions, commands, and telemetry |
+| `TELLO_FLIGHT_VIDEO_MAX_BYTES` | `524288000` | Maximum size of one saved flight recording (500 MiB) |
+| `TELLO_AUTO_RECORD_ON_TAKEOFF` | `false` | Start browser recording before takeoff and stop after telemetry confirms landing |
+| `TELLO_AUTO_RECORD_LANDING_SPEED_THRESHOLD_CM_S` | `0` | Maximum 3-axis speed for landing confirmation |
+| `TELLO_AUTO_RECORD_LANDING_CONFIRMATION_SAMPLES` | `8` | Consecutive landed telemetry samples required before stopping |
 | `TELLO_VIDEO_FPS` | `30` | Video stream frame rate |
 | `TELLO_VIDEO_JPEG_QUALITY` | `70` | JPEG compression quality |
 | `TELLO_WEBRTC_PUBLIC_HOST` | Origin/request host | Hostname/IP advertised in WebRTC ICE candidates |
@@ -196,11 +200,17 @@ All environment variables are prefixed with `TELLO_`. See `.env.template` for th
 
 ## Flight History
 
-Connected flights are stored in SQLite at `TELLO_FLIGHT_LOG_DB_PATH`. Each session records command results and telemetry snapshots at the configured polling frequency. The UI provides a read-only timeline from the Flight History button on the connection screen or command log.
+Connected flights are stored in SQLite at `TELLO_FLIGHT_LOG_DB_PATH`. Each session records command results and telemetry snapshots at the configured polling frequency. While connected, use **Record Flight** to capture the WebRTC feed; starting and stopping the recording are also recorded as flight-history events, and stopping saves an H.264 MP4 beside the database. Browser WebM recordings are transcoded on the backend, and legacy WebM recordings are converted on first playback. A recording is limited by `TELLO_FLIGHT_VIDEO_MAX_BYTES` and only one recording is stored per flight.
+
+With `TELLO_AUTO_RECORD_ON_TAKEOFF=true`, takeoff waits for a connected browser recorder to confirm recording has started. If the recorder is unavailable or fails to start, takeoff is rejected. Recording stops after telemetry confirms the drone rose at least 15 cm above its starting height, then returned to within 5 cm of that height with speed at or below `TELLO_AUTO_RECORD_LANDING_SPEED_THRESHOLD_CM_S` for `TELLO_AUTO_RECORD_LANDING_CONFIRMATION_SAMPLES` consecutive readings. Defaults require zero speed on all three axes for 8 readings (about 2 seconds at 4 Hz).
+
+Open **Flight History** to play a saved recording with telemetry values synchronized to the playback position. Selecting a command or telemetry event seeks the video to its timestamp. Use **Full-Screen Replay** for a read-only view that mirrors the live HUD positions, with historical telemetry, a command-only timeline that emphasizes the most recent action at the playhead, and flight controls highlighted briefly as recorded commands play. Replay controls cannot send commands to the drone. Sessions without a recording retain the existing event-only timeline.
+
+Command events are timestamped when the drone command is dispatched, rather than when the SDK call completes, so slow responses do not shift the replay timeline.
 
 Docker Compose mounts a named volume at `/app/data` so the default database survives container recreation. For native development, the database path is relative to the backend working directory unless an absolute path is configured.
 
-The read-only API is available at `GET /api/flights` and `GET /api/flights/{flight_id}/events`. Both endpoints support pagination; event pages are ordered chronologically.
+The history API includes `GET /api/flights`, `GET /api/flights/active`, `GET /api/flights/{flight_id}/events`, `PUT /api/flights/{flight_id}/video`, and `GET /api/flights/{flight_id}/video`. Event pages are ordered chronologically and support pagination.
 
 ## WebRTC Video
 
@@ -295,7 +305,7 @@ A roadmap of where this project could go, roughly ordered from most practical to
 ### Phase 1 — Platform Hardening
 
 - **MCP Server** *(implemented)* — Expose status and bounded drone control tools over stdio; see [MCP Server](#mcp-server)
-- **Flight Logging & Replay** *(implemented)* — Persist command outcomes and telemetry snapshots in SQLite with a read-only timeline in the UI; see [Flight History](#flight-history)
+- **Flight Logging & Replay** *(implemented)* — Persist command outcomes and telemetry snapshots in SQLite, save WebRTC recordings beside the database, and replay them with synchronized telemetry and event seeking; see [Flight History](#flight-history)
 - **Gamepad Support** *(implemented)* — Map PS5/Xbox controllers via the Gamepad API to `send_rc_control()` for proper analog stick flying; see [Gamepad Control](#gamepad-control)
 - **WebRTC Video** *(implemented)* — Stream captured video over a peer-to-peer WebRTC connection; see [WebRTC Video](#webrtc-video)
 

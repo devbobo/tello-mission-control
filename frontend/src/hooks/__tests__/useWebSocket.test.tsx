@@ -1,22 +1,35 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useDroneStore } from '@/stores/droneStore';
 
 class MockWebSocket {
-  static latest: MockWebSocket;
+  static OPEN = 1;
+  static latest: MockWebSocket | undefined;
+  static instances: MockWebSocket[] = [];
+
+  readyState = 0;
   onopen: ((event: Event) => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
-  close = vi.fn();
+  sent: string[] = [];
 
   constructor(_url: string) {
     MockWebSocket.latest = this;
+    MockWebSocket.instances.push(this);
   }
+
+  send = vi.fn((message: string) => {
+    this.sent.push(message);
+  });
+
+  close = vi.fn(() => {
+    this.readyState = 3;
+  });
 }
 
-describe('useWebSocket vision messages', () => {
+describe('useWebSocket messages', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     useDroneStore.setState({
@@ -25,7 +38,10 @@ describe('useWebSocket vision messages', () => {
       visionFrame: null,
       odometryFrame: null,
       markerFrame: null,
+      recordingReady: false,
+      recordingRequestHandler: null,
     });
+    MockWebSocket.instances = [];
   });
 
   it('stores the latest timestamped vision result', () => {
@@ -56,7 +72,7 @@ describe('useWebSocket vision messages', () => {
     };
 
     act(() => {
-      MockWebSocket.latest.onmessage?.({
+      MockWebSocket.latest?.onmessage?.({
         data: JSON.stringify(visionMessage),
       } as MessageEvent);
     });
@@ -90,7 +106,7 @@ describe('useWebSocket vision messages', () => {
     };
 
     act(() => {
-      MockWebSocket.latest.onmessage?.({
+      MockWebSocket.latest?.onmessage?.({
         data: JSON.stringify(odometryMessage),
       } as MessageEvent);
     });
@@ -131,7 +147,7 @@ describe('useWebSocket vision messages', () => {
     };
 
     act(() => {
-      MockWebSocket.latest.onmessage?.({
+      MockWebSocket.latest?.onmessage?.({
         data: JSON.stringify(markerMessage),
       } as MessageEvent);
     });
@@ -139,6 +155,50 @@ describe('useWebSocket vision messages', () => {
     expect(useDroneStore.getState().markerFrame).toEqual({
       data: markerMessage.data,
       timestamp: markerMessage.timestamp,
+    });
+    unmount();
+  });
+
+  it('reports recorder readiness and acknowledges backend recording requests', async () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    const handler = vi.fn(async () => undefined);
+    useDroneStore.setState({
+      connectionStatus: 'connected',
+      recordingReady: true,
+      recordingRequestHandler: handler,
+    });
+
+    const { unmount } = renderHook(() => useWebSocket());
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const socket = MockWebSocket.instances[0];
+    socket.readyState = MockWebSocket.OPEN;
+    act(() => socket.onopen?.(new Event('open')));
+
+    expect(JSON.parse(socket.sent[0])).toEqual({
+      type: 'recorder_status',
+      data: { ready: true },
+    });
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: 'recording_request',
+          data: { request_id: 'request-1', action: 'start' },
+        }),
+      } as MessageEvent);
+    });
+    await waitFor(() => expect(handler).toHaveBeenCalledWith('start'));
+    await waitFor(() => {
+      expect(socket.sent.map((message) => JSON.parse(message))).toContainEqual({
+        type: 'recording_ack',
+        data: { request_id: 'request-1', ok: true },
+      });
+    });
+
+    act(() => useDroneStore.setState({ recordingReady: false }));
+    expect(JSON.parse(socket.sent[socket.sent.length - 1] ?? '')).toEqual({
+      type: 'recorder_status',
+      data: { ready: false },
     });
     unmount();
   });

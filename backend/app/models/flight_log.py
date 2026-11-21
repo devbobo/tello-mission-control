@@ -9,6 +9,9 @@ class FlightSession(BaseModel):
     ended_at: str | None
     status: Literal["active", "completed", "interrupted"]
     event_count: int
+    video_available: bool = False
+    video_started_at: str | None = None
+    video_duration_ms: int | None = None
 
 
 class FlightEvent(BaseModel):

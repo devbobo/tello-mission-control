@@ -25,6 +25,9 @@ export interface FlightSession {
   ended_at: string | null;
   status: 'active' | 'completed' | 'interrupted';
   event_count: number;
+  video_available: boolean;
+  video_started_at: string | null;
+  video_duration_ms: number | null;
 }
 
 export interface FlightEvent {
@@ -174,4 +177,12 @@ export type WsMessage =
   | { type: 'odometry'; data: OdometryData; timestamp: string }
   | { type: 'markers'; data: MarkerFrameData; timestamp: string }
   | { type: 'command_log'; data: CommandLogEntry }
-  | { type: 'sequence_progress'; data: SequenceProgress };
+  | { type: 'sequence_progress'; data: SequenceProgress }
+  | { type: 'recording_request'; data: RecordingRequest };
+
+export type RecordingRequestAction = 'start' | 'stop';
+
+export interface RecordingRequest {
+  request_id: string;
+  action: RecordingRequestAction;
+}
