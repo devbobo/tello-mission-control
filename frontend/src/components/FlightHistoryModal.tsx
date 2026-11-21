@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Clock3, Maximize2, Minimize2, Pause, Play, X } from 'lucide-react';
 import { batteryTextColor } from '@/lib/format';
 import { ReplayActionButtons } from '@/components/ActionButtons';
+import ArtificialHorizon from '@/components/ArtificialHorizon';
 import EmergencyButton from '@/components/EmergencyButton';
 import FlightControls from '@/components/FlightControls';
 import * as api from '@/lib/api';
@@ -561,6 +562,12 @@ export default function FlightHistoryModal({ isOpen, onClose }: FlightHistoryMod
                   fullScreenReplay ? 'hidden' : ''
                 }`}
               >
+                {!fullScreenReplay && (
+                  <ArtificialHorizon
+                    attitude={currentTelemetry?.attitude ?? null}
+                    className="h-16 w-16"
+                  />
+                )}
                 {currentTelemetry ? (
                   <span aria-live="polite">
                     BAT {currentTelemetry.battery}% · ALT {currentTelemetry.height} cm · FLIGHT{' '}

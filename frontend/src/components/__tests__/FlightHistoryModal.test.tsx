@@ -42,7 +42,7 @@ const telemetryEvent: FlightEvent = {
     height: 50,
     flight_time: 1,
     temperature: { high: 65, low: 60 },
-    attitude: { pitch: 0, roll: 0, yaw: 0 },
+    attitude: { pitch: 12, roll: -15, yaw: 0 },
     speed: { x: 0, y: 0, z: 0 },
     barometer: 50,
     tof_distance: 50,
@@ -191,6 +191,7 @@ describe('FlightHistoryModal', () => {
     render(<FlightHistoryModal isOpen onClose={onClose} />);
 
     const video = await screen.findByLabelText('Flight recording') as HTMLVideoElement;
+    expect(screen.getByRole('img', { name: 'Artificial horizon: attitude unavailable' })).toBeInTheDocument();
     expect(video.controls).toBe(false);
     expect(screen.getByRole('button', { name: 'Play flight recording' })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: 'Seek flight recording' })).toBeInTheDocument();
@@ -199,11 +200,25 @@ describe('FlightHistoryModal', () => {
     fireEvent.timeUpdate(video);
 
     expect(await screen.findByText(/BAT 80% · ALT 50 cm/)).toBeInTheDocument();
+    expect(screen.getByRole('img', {
+      name: 'Artificial horizon: pitch 12 degrees, roll -15 degrees',
+    })).toBeInTheDocument();
+    expect(screen.getByTestId('horizon-attitude')).toHaveAttribute('transform', 'translate(60 73.2)');
+    expect(screen.getByTestId('horizon-aircraft')).toHaveAttribute('transform', 'rotate(-15 60 60)');
+    expect(screen.getByTestId('horizon-bank-scale')).toHaveAttribute('transform', 'rotate(-15 60 60)');
+    expect(screen.getByTestId('horizon-bank-pointer')).not.toHaveAttribute('transform');
 
     fireEvent.click(screen.getByRole('button', { name: 'Enter full-screen replay' }));
     expect(screen.getByRole('dialog', { name: 'Full-screen flight replay' })).toBeInTheDocument();
     expect(screen.getByLabelText('Flight recording')).toBe(video);
     expect(screen.getByText('50 cm')).toBeInTheDocument();
+    expect(screen.getByRole('img', {
+      name: 'Artificial horizon: pitch 12 degrees, roll -15 degrees',
+    })).toBeInTheDocument();
+    expect(screen.getByTestId('horizon-attitude')).toHaveAttribute('transform', 'translate(60 73.2)');
+    expect(screen.getByTestId('horizon-aircraft')).toHaveAttribute('transform', 'rotate(-15 60 60)');
+    expect(screen.getByTestId('horizon-bank-scale')).toHaveAttribute('transform', 'rotate(-15 60 60)');
+    expect(screen.getByTestId('horizon-bank-pointer')).not.toHaveAttribute('transform');
     expect(screen.getByText('replay')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /seek to Battery 80%/i })).not.toBeInTheDocument();
     expect(screen.getByText('4 commands shown')).toBeInTheDocument();
@@ -244,6 +259,7 @@ describe('FlightHistoryModal', () => {
     expect(video.currentTime).toBe(1);
     expect(video.play).toHaveBeenCalledOnce();
     fireEvent.timeUpdate(video);
+    expect(screen.getByRole('img', { name: 'Artificial horizon: attitude unavailable' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Replay takeoff' })).toHaveAttribute(
       'data-replay-active',
       'true',
