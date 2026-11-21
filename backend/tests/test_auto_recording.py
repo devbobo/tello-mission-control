@@ -161,6 +161,7 @@ def test_auto_takeoff_is_blocked_when_browser_recorder_is_unavailable(
 ):
     monkeypatch.setattr(settings, "auto_record_on_takeoff", True)
     assert test_client.post("/api/control/connect").status_code == 200
+    monkeypatch.setattr(settings, "use_mock_drone", False)
 
     response = test_client.post("/api/control/takeoff")
 
@@ -169,11 +170,25 @@ def test_auto_takeoff_is_blocked_when_browser_recorder_is_unavailable(
     assert test_client.get("/api/status").json()["flying"] is False
 
 
+def test_mock_takeoff_ignores_auto_recording_without_browser_recorder(
+    test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(settings, "auto_record_on_takeoff", True)
+    monkeypatch.setattr(settings, "use_mock_drone", True)
+    assert test_client.post("/api/control/connect").status_code == 200
+
+    response = test_client.post("/api/control/takeoff")
+
+    assert response.status_code == 200
+    assert test_client.get("/api/status").json()["flying"] is True
+
+
 def test_auto_takeoff_starts_only_after_recorder_acknowledges_start(
     test_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(settings, "auto_record_on_takeoff", True)
     assert test_client.post("/api/control/connect").status_code == 200
+    monkeypatch.setattr(settings, "use_mock_drone", False)
     service: AutoRecordingService = app.state.auto_recording_service
     manager = app.state.drone_manager
     actions: list[tuple[str, bool]] = []
@@ -207,6 +222,7 @@ def test_takeoff_waits_for_recording_ack_and_rejects_failed_start(
 ):
     monkeypatch.setattr(settings, "auto_record_on_takeoff", True)
     assert test_client.post("/api/control/connect").status_code == 200
+    monkeypatch.setattr(settings, "use_mock_drone", False)
     service: AutoRecordingService = app.state.auto_recording_service
     manager = app.state.drone_manager
     actions: list[tuple[str, bool]] = []
@@ -245,6 +261,7 @@ def test_recording_is_stopped_if_drone_takeoff_fails(
 ):
     monkeypatch.setattr(settings, "auto_record_on_takeoff", True)
     assert test_client.post("/api/control/connect").status_code == 200
+    monkeypatch.setattr(settings, "use_mock_drone", False)
     service: AutoRecordingService = app.state.auto_recording_service
     manager = app.state.drone_manager
     actions: list[str] = []

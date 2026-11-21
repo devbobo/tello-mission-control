@@ -69,7 +69,11 @@ async def takeoff(request: Request):
     recording_prepared = False
     baseline_height: int | None = None
     try:
-        if settings.auto_record_on_takeoff and dm.is_connected:
+        if (
+            settings.auto_record_on_takeoff
+            and not settings.use_mock_drone
+            and dm.is_connected
+        ):
             await auto_recording.start_recording_for_takeoff()
             recording_prepared = True
             telemetry = await dm.get_telemetry()
