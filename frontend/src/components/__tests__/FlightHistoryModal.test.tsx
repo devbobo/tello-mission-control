@@ -67,6 +67,13 @@ const landEvent: FlightEvent = {
   command: 'land',
 };
 
+const emergencyEvent: FlightEvent = {
+  ...commandEvent,
+  id: 7,
+  occurred_at: '2026-11-15T00:00:04.500Z',
+  command: 'emergency',
+};
+
 const recordingStartEvent: FlightEvent = {
   ...commandEvent,
   id: 5,
@@ -160,15 +167,15 @@ describe('FlightHistoryModal', () => {
     });
     const recordedSession: FlightSession = {
       ...session,
-      event_count: 4,
+      event_count: 5,
       video_available: true,
       video_started_at: '2026-11-15T00:00:00Z',
-      video_duration_ms: 5000,
+      video_duration_ms: 7000,
     };
     vi.spyOn(api, 'getFlightSessions').mockResolvedValue([recordedSession]);
     vi.spyOn(api, 'getFlightEvents').mockResolvedValue({
       items: [commandEvent, telemetryEvent, moveEvent],
-      total: 4,
+      total: 5,
       limit: 100,
       offset: 0,
     });
@@ -177,6 +184,7 @@ describe('FlightHistoryModal', () => {
       telemetryEvent,
       moveEvent,
       landEvent,
+      emergencyEvent,
     ]);
 
     const onClose = vi.fn();
@@ -198,7 +206,7 @@ describe('FlightHistoryModal', () => {
     expect(screen.getByText('50 cm')).toBeInTheDocument();
     expect(screen.getByText('replay')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /seek to Battery 80%/i })).not.toBeInTheDocument();
-    expect(screen.getByText('3 commands shown')).toBeInTheDocument();
+    expect(screen.getByText('4 commands shown')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
     const takeoffTimelineItem = screen.getByRole('button', { name: /seek to takeoff/i });
     const moveTimelineItem = screen.getByRole('button', { name: /seek to move/i });
@@ -216,7 +224,10 @@ describe('FlightHistoryModal', () => {
       'true',
     );
     expect(screen.getByRole('button', { name: 'Replay takeoff' })).toHaveClass('ring-info/80');
-    expect(screen.getByRole('button', { name: 'Emergency Stop' })).toBeDisabled();
+    const emergencyButton = screen.getByRole('button', { name: 'Emergency Stop' });
+    expect(emergencyButton).toBeDisabled();
+    expect(emergencyButton).toHaveClass('opacity-25', '!animate-none');
+    expect(emergencyButton).not.toHaveAttribute('data-replay-active');
 
     Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 2.6 });
     fireEvent.timeUpdate(video);
@@ -253,6 +264,18 @@ describe('FlightHistoryModal', () => {
       target: { value: '4' },
     });
     expect(video.currentTime).toBe(4);
+
+    Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 4.6 });
+    fireEvent.timeUpdate(video);
+    expect(emergencyButton).toHaveAttribute('data-replay-active', 'true');
+    expect(emergencyButton).toHaveClass('!opacity-100', 'ring-danger');
+    expect(emergencyButton).not.toHaveClass('opacity-25');
+    expect(emergencyButton).toBeDisabled();
+
+    Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 6.1 });
+    fireEvent.timeUpdate(video);
+    expect(emergencyButton).toHaveClass('opacity-25');
+    expect(emergencyButton).not.toHaveAttribute('data-replay-active');
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByRole('dialog', { name: 'Flight history' })).toBeInTheDocument();

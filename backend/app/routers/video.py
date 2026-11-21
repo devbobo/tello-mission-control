@@ -64,7 +64,6 @@ async def video_webrtc_config() -> dict[str, list[dict]]:
 @router.post("/webrtc/offer", response_model=WebRTCAnswer)
 async def video_webrtc_offer(request: Request, body: WebRTCOffer):
     """Negotiate a WebRTC video peer using a browser-generated SDP offer."""
-    dm = request.app.state.drone_manager
     service = request.app.state.webrtc_service
     origin = request.headers.get("origin")
     try:
@@ -85,13 +84,13 @@ async def video_webrtc_offer(request: Request, body: WebRTCOffer):
         answer = await service.create_answer(body.sdp, public_host)
         return WebRTCAnswer(**answer)
     except DroneNotConnectedError as e:
-        await _log_stream_failure(dm, "webrtc_offer", e)
+        logger.warning("WebRTC offer failed: drone is not connected")
         raise HTTPException(status_code=409, detail="Drone is not connected")
     except ValueError as e:
-        await _log_stream_failure(dm, "webrtc_offer", e)
+        logger.warning("WebRTC offer failed: %s", e)
         raise HTTPException(status_code=400, detail=f"Invalid WebRTC offer: {e}")
     except Exception as e:
-        await _log_stream_failure(dm, "webrtc_offer", e)
+        logger.exception("WebRTC offer failed")
         raise HTTPException(status_code=500, detail=f"WebRTC negotiation failed: {e}")
 
 

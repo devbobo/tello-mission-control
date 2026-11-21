@@ -79,6 +79,60 @@ def test_rotate_validates_angle_range(test_client: TestClient):
     assert resp.status_code == 422
 
 
+@pytest.mark.parametrize("direction", ["forward", "back", "left", "right"])
+def test_flip_calls_matching_drone_method(test_client: TestClient, monkeypatch, direction):
+    test_client.post("/api/control/connect")
+    test_client.post("/api/control/takeoff")
+    tello = test_client.app.state.drone_manager.tello
+    calls = []
+    monkeypatch.setattr(tello, f"flip_{direction}", lambda: calls.append(direction), raising=False)
+
+    response = test_client.post("/api/control/flip", json={"direction": direction})
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert calls == [direction]
+    flight = test_client.get("/api/flights/active").json()
+    events = test_client.get(f"/api/flights/{flight['id']}/events").json()["items"]
+    assert any(
+        event["command"] == "flip"
+        and event["params"] == {"direction": direction}
+        and event["result"] == "ok"
+        for event in events
+    )
+
+
+def test_flip_requires_connection_and_flight_and_validates_direction(test_client: TestClient):
+    body = {"direction": "forward"}
+    assert test_client.post("/api/control/flip", json=body).status_code == 409
+    test_client.post("/api/control/connect")
+    assert test_client.post("/api/control/flip", json=body).status_code == 409
+    assert test_client.post("/api/control/flip", json={"direction": "up"}).status_code == 422
+
+
+def test_flip_reports_drone_failure(test_client: TestClient, monkeypatch):
+    test_client.post("/api/control/connect")
+    test_client.post("/api/control/takeoff")
+    tello = test_client.app.state.drone_manager.tello
+
+    def fail():
+        raise RuntimeError("Flip rejected by drone")
+
+    monkeypatch.setattr(tello, "flip_forward", fail, raising=False)
+    response = test_client.post("/api/control/flip", json={"direction": "forward"})
+
+    assert response.status_code == 500
+    assert "Flip rejected by drone" in response.json()["detail"]
+    flight = test_client.get("/api/flights/active").json()
+    events = test_client.get(f"/api/flights/{flight['id']}/events").json()["items"]
+    assert any(
+        event["command"] == "flip"
+        and event["params"] == {"direction": "forward"}
+        and event["result"] == "error"
+        for event in events
+    )
+
+
 def test_rc_control_requires_connection_and_flight(test_client: TestClient):
     body = {"lr": 0, "fb": 50, "ud": 0, "yaw": 0}
     assert test_client.post("/api/control/rc", json=body).status_code == 409

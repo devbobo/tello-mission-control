@@ -9,7 +9,7 @@ from typing import Any, Callable
 import cv2
 
 from app.config import settings
-from app.models.commands import MoveDirection, RotateDirection
+from app.models.commands import FlipDirection, MoveDirection, RotateDirection
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +114,18 @@ class MockTello:
     def rotate_counter_clockwise(self, x: int) -> None:
         self._yaw = (self._yaw - x) % 360
         logger.info("MockTello: rotate_ccw %ddeg", x)
+
+    def flip_forward(self) -> None:
+        logger.info("MockTello: flip forward")
+
+    def flip_back(self) -> None:
+        logger.info("MockTello: flip back")
+
+    def flip_left(self) -> None:
+        logger.info("MockTello: flip left")
+
+    def flip_right(self) -> None:
+        logger.info("MockTello: flip right")
 
     def send_rc_control(self, lr: int, fb: int, ud: int, yaw: int) -> None:
         self.last_rc_control = (lr, fb, ud, yaw)
@@ -515,6 +527,21 @@ class DroneManager:
             occurred_at=command_timestamp,
         )
         return {"ok": True, "message": f"Rotated {direction.value} {angle_deg}°"}
+
+    async def flip(self, direction: FlipDirection) -> dict:
+        self._require_connected()
+        self._require_flying()
+        method_map = {
+            FlipDirection.forward: self._tello.flip_forward,
+            FlipDirection.back: self._tello.flip_back,
+            FlipDirection.left: self._tello.flip_left,
+            FlipDirection.right: self._tello.flip_right,
+        }
+        _, command_timestamp = await self.execute(method_map[direction], reset_rc=True)
+        await self._broadcast_command_log(
+            "flip", {"direction": direction.value}, "ok", occurred_at=command_timestamp
+        )
+        return {"ok": True, "message": f"Flipped {direction.value}"}
 
     # -- Video streaming --
 

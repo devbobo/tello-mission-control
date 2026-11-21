@@ -84,13 +84,14 @@ class AutoRecordingService:
             ready = data.get("ready")
             if isinstance(ready, bool):
                 recorder.ready = ready
-                if (
-                    ready
-                    and self._recording_active
-                    and self._active_recorder_id is None
-                ):
-                    self._active_recorder_id = recorder_id
-                    if self._stop_pending:
+                if ready and self._recording_active:
+                    if self._active_recorder_id is None:
+                        self._active_recorder_id = recorder_id
+                    if (
+                        self._active_recorder_id == recorder_id
+                        and self._stop_pending
+                        and (self._stop_task is None or self._stop_task.done())
+                    ):
                         self._stop_task = asyncio.create_task(
                             self._stop_pending_recording()
                         )
@@ -110,7 +111,13 @@ class AutoRecordingService:
             )
 
     async def start_recording_for_takeoff(self) -> None:
+        if self._stop_task is not None and not self._stop_task.done():
+            await self._stop_task
         async with self._request_lock:
+            if self._recording_active:
+                raise AutoRecordingError(
+                    "The previous automatic recording has not stopped"
+                )
             recorder_id = self._get_ready_recorder()
             if recorder_id is None:
                 raise AutoRecordingError(
@@ -125,6 +132,14 @@ class AutoRecordingService:
         self._airborne = False
         self._landing_samples = 0
         self._monitoring_landing = True
+
+    def stop_recording_after_successful_land(self) -> None:
+        if not self._recording_active:
+            return
+        if self._stop_task is not None and not self._stop_task.done():
+            return
+        self._monitoring_landing = False
+        self._stop_task = asyncio.create_task(self._stop_after_landing())
 
     async def stop_recording_after_failed_takeoff(self) -> None:
         recorder_id = self._active_recorder_id

@@ -3,6 +3,7 @@ from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -10,6 +11,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from app.models.flight_log import FlightEventPage, FlightSession
 from app.services.flight_log_service import (
     FlightNotFoundError,
+    FlightSessionConflictError,
     FlightVideoAlreadyExistsError,
     FlightVideoTooLargeError,
 )
@@ -31,12 +33,26 @@ async def get_active_flight(request: Request):
     return await request.app.state.flight_log_service.get_active_session()
 
 
+@router.post("/{flight_id}/next", response_model=FlightSession)
+async def start_next_recording_session(flight_id: str, request: Request):
+    drone_manager = request.app.state.drone_manager
+    if not drone_manager.is_connected or drone_manager.is_flying:
+        raise HTTPException(status_code=409, detail="Drone must be connected and grounded")
+    try:
+        return await request.app.state.flight_log_service.start_next_recording_session(
+            flight_id
+        )
+    except FlightSessionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error))
+
+
 @router.put("/{flight_id}/video", status_code=201)
 async def upload_flight_video(
     flight_id: str,
     request: Request,
     started_at: Annotated[datetime, Query()],
     duration_ms: Annotated[int, Query(ge=1)],
+    recording_id: Annotated[UUID | None, Query()] = None,
 ):
     content_type = request.headers.get("content-type", "").split(";", maxsplit=1)[0].strip()
     if content_type != "video/webm":
@@ -48,6 +64,7 @@ async def upload_flight_video(
             started_at,
             duration_ms,
             request.stream(),
+            str(recording_id) if recording_id is not None else None,
         )
     except FlightNotFoundError:
         raise HTTPException(status_code=404, detail="Flight session not found")

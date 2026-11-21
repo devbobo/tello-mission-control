@@ -156,6 +156,7 @@ python -m pytest -v    # 54 tests, all use MockTello (no drone needed)
 | POST | `/api/control/emergency` | Emergency motor kill |
 | POST | `/api/control/move` | Move (body: `{direction, distance_cm}`) |
 | POST | `/api/control/rotate` | Rotate (body: `{direction, angle_deg}`) |
+| POST | `/api/control/flip` | Flip while flying (body: `{direction}`: `forward`, `back`, `left`, or `right`) |
 | POST | `/api/video/webrtc/offer` | Exchange a browser SDP offer for an SDP answer and peer ID |
 | DELETE | `/api/video/webrtc/{peer_id}` | Close a WebRTC peer |
 | POST | `/api/video/stream/start` | Start video stream |
@@ -189,7 +190,7 @@ All environment variables are prefixed with `TELLO_`. See `.env.template` for th
 | `TELLO_TELEMETRY_POLL_HZ` | `4.0` | Telemetry polling frequency |
 | `TELLO_FLIGHT_LOG_DB_PATH` | `data/flight_logs.sqlite3` | SQLite database for flight sessions, commands, and telemetry |
 | `TELLO_FLIGHT_VIDEO_MAX_BYTES` | `524288000` | Maximum size of one saved flight recording (500 MiB) |
-| `TELLO_AUTO_RECORD_ON_TAKEOFF` | `false` | Start browser recording before takeoff and stop after telemetry confirms landing |
+| `TELLO_AUTO_RECORD_ON_TAKEOFF` | `false` | Start browser recording before takeoff and stop after a successful land command or telemetry-confirmed landing |
 | `TELLO_AUTO_RECORD_LANDING_SPEED_THRESHOLD_CM_S` | `0` | Maximum 3-axis speed for landing confirmation |
 | `TELLO_AUTO_RECORD_LANDING_CONFIRMATION_SAMPLES` | `8` | Consecutive landed telemetry samples required before stopping |
 | `TELLO_VIDEO_FPS` | `30` | Video stream frame rate |
@@ -200,9 +201,11 @@ All environment variables are prefixed with `TELLO_`. See `.env.template` for th
 
 ## Flight History
 
-Connected flights are stored in SQLite at `TELLO_FLIGHT_LOG_DB_PATH`. Each session records command results and telemetry snapshots at the configured polling frequency. While connected, use **Record Flight** to capture the WebRTC feed; starting and stopping the recording are also recorded as flight-history events, and stopping saves an H.264 MP4 beside the database. Browser WebM recordings are transcoded on the backend, and legacy WebM recordings are converted on first playback. A recording is limited by `TELLO_FLIGHT_VIDEO_MAX_BYTES` and only one recording is stored per flight.
+Connected flights are stored in SQLite at `TELLO_FLIGHT_LOG_DB_PATH`. Each session records command results and telemetry snapshots at the configured polling frequency. While connected, use **Record Flight** to capture the WebRTC feed; starting and stopping the recording are also recorded as flight-history events. Stopping places the WebM recording in the browser's IndexedDB queue; uploads and H.264 MP4 conversion run in the background. Only one recording is stored per flight session. Starting the next recording creates a new session without disconnecting or waiting for the previous video to finish saving; the drone must be grounded.
 
-With `TELLO_AUTO_RECORD_ON_TAKEOFF=true`, real-drone takeoff waits for a connected browser recorder to confirm recording has started. If the recorder is unavailable or fails to start, takeoff is rejected. This setting is ignored when `TELLO_USE_MOCK_DRONE=true`, so mock takeoff does not require a browser recorder. Recording stops after telemetry confirms the drone rose at least 15 cm above its starting height, then returned to within 5 cm of that height with speed at or below `TELLO_AUTO_RECORD_LANDING_SPEED_THRESHOLD_CM_S` for `TELLO_AUTO_RECORD_LANDING_CONFIRMATION_SAMPLES` consecutive readings. Defaults require zero speed on all three axes for 8 readings (about 2 seconds at 4 Hz).
+Uploads are processed sequentially. Failed uploads remain queued and show a **Retry** button; reopening the recording view also resumes queued uploads. Keep the app open while uploads complete. Clearing browser data, private browsing cleanup, or storage exhaustion can remove or prevent queued recordings. If the browser cannot store a recording, keep the page open and retry preparing it before starting another flight. Each recording is limited by `TELLO_FLIGHT_VIDEO_MAX_BYTES`. Saved MP4s are stored beside the database, and legacy WebM recordings are converted on first playback.
+
+With `TELLO_AUTO_RECORD_ON_TAKEOFF=true`, real-drone takeoff waits for a connected browser recorder to confirm recording has started. If the recorder is unavailable or fails to start, takeoff is rejected. This setting is ignored when `TELLO_USE_MOCK_DRONE=true`, so mock takeoff does not require a browser recorder. A successful land command triggers recording to stop without waiting for telemetry; a failed land command does not. As a fallback for other landings, recording stops after telemetry confirms the drone rose at least 15 cm above its starting height, then returned to within 5 cm of that height with speed at or below `TELLO_AUTO_RECORD_LANDING_SPEED_THRESHOLD_CM_S` for `TELLO_AUTO_RECORD_LANDING_CONFIRMATION_SAMPLES` consecutive readings. Defaults require zero speed on all three axes for 8 readings (about 2 seconds at 4 Hz). A successful land response does not wait for the browser to finish saving the recording.
 
 Open **Flight History** to play a saved recording with telemetry values synchronized to the playback position. Selecting a command or telemetry event seeks the video to its timestamp. Use **Full-Screen Replay** for a read-only view that mirrors the live HUD positions, with historical telemetry, a command-only timeline that emphasizes the most recent action at the playhead, and flight controls highlighted briefly as recorded commands play. Replay controls cannot send commands to the drone. Sessions without a recording retain the existing event-only timeline.
 
@@ -215,6 +218,8 @@ The history API includes `GET /api/flights`, `GET /api/flights/active`, `GET /ap
 ## WebRTC Video
 
 The browser sends an SDP offer to `POST /api/video/webrtc/offer`; the backend returns an SDP answer and peer ID. The backend sends captured Tello frames using WebRTC, while snapshots remain available through `POST /api/video/snapshot`. The peer is closed automatically when the video component unmounts or the drone disconnects.
+
+WebRTC offer failures are reported in the HTTP response and backend logs, not the drone command log.
 
 In Docker Compose, UDP ports `40000-40100` are mapped to the backend and used for media. The backend advertises the browser's Origin host (or request host when Origin is absent) by default. Set `TELLO_WEBRTC_PUBLIC_HOST` when a reverse proxy or NAT requires a different browser-reachable address, and forward the configured UDP range to the backend. WebRTC requires direct UDP connectivity; opening only the HTTP/API port is not sufficient.
 

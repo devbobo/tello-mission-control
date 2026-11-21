@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pytest
 
-from app.models.commands import MoveDirection, RotateDirection
+from app.models.commands import FlipDirection, MoveDirection, RotateDirection
 from app.services.drone_manager import (
     DroneManager,
     DroneCommandBusyError,
@@ -220,6 +220,27 @@ async def test_rc_control_is_neutralized_before_discrete_movement(dm):
     await dm.move(MoveDirection.forward, 100)
 
     assert observed_rc == [(0, 0, 0, 0)]
+
+
+@pytest.mark.asyncio
+async def test_flip_resets_rc_and_records_direction(dm):
+    await dm.connect()
+    await dm.takeoff()
+    await dm.send_rc_control(40, 0, 0, 0)
+    logs = []
+    observed_rc = []
+
+    async def log_cb(entry):
+        logs.append(entry["data"])
+
+    dm.add_command_log_callback(log_cb)
+    dm.tello.flip_forward = lambda: observed_rc.append(dm.tello.last_rc_control)
+    await dm.flip(FlipDirection.forward)
+
+    assert observed_rc == [(0, 0, 0, 0)]
+    assert logs[-1]["command"] == "flip"
+    assert logs[-1]["params"] == {"direction": "forward"}
+    assert logs[-1]["result"] == "ok"
 
 
 @pytest.mark.asyncio

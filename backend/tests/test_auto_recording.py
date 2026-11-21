@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+from threading import Event
 
 import pytest
 from fastapi.testclient import TestClient
@@ -74,6 +75,172 @@ async def test_takeoff_recording_waits_for_browser_acknowledgement():
         },
     )
     await start_request
+
+
+@pytest.mark.asyncio
+async def test_successful_land_sends_only_one_stop_while_awaiting_acknowledgement():
+    service = AutoRecordingService()
+    requests: list[dict] = []
+    sent = asyncio.Event()
+    recorder_id = ""
+
+    async def send(message: dict):
+        request = message["data"]
+        requests.append(request)
+        if request["action"] == "start":
+            service.handle_client_message(
+                recorder_id,
+                {
+                    "type": "recording_ack",
+                    "data": {"request_id": request["request_id"], "ok": True},
+                },
+            )
+        else:
+            sent.set()
+
+    recorder_id = service.connect_recorder(send)
+    service.handle_client_message(
+        recorder_id, {"type": "recorder_status", "data": {"ready": True}}
+    )
+    await service.start_recording_for_takeoff()
+
+    service.stop_recording_after_successful_land()
+    await asyncio.wait_for(sent.wait(), timeout=1)
+    service.stop_recording_after_successful_land()
+    assert [request["action"] for request in requests] == ["start", "stop"]
+
+    service.handle_client_message(
+        recorder_id,
+        {
+            "type": "recording_ack",
+            "data": {"request_id": requests[-1]["request_id"], "ok": True},
+        },
+    )
+    assert service._stop_task is not None
+    await service._stop_task
+    service.stop_recording_after_successful_land()
+    assert [request["action"] for request in requests] == ["start", "stop"]
+
+
+@pytest.mark.asyncio
+async def test_next_takeoff_waits_for_previous_recording_stop():
+    service = AutoRecordingService()
+    requests: list[dict] = []
+    sent = asyncio.Event()
+    recorder_id = ""
+
+    async def send(message: dict):
+        request = message["data"]
+        requests.append(request)
+        if request["action"] == "stop":
+            sent.set()
+        else:
+            service.handle_client_message(
+                recorder_id,
+                {
+                    "type": "recording_ack",
+                    "data": {"request_id": request["request_id"], "ok": True},
+                },
+            )
+
+    recorder_id = service.connect_recorder(send)
+    service.handle_client_message(
+        recorder_id, {"type": "recorder_status", "data": {"ready": True}}
+    )
+    await service.start_recording_for_takeoff()
+    service.stop_recording_after_successful_land()
+    await asyncio.wait_for(sent.wait(), timeout=1)
+    next_start = asyncio.create_task(service.start_recording_for_takeoff())
+    await asyncio.sleep(0)
+    assert not next_start.done()
+    assert [request["action"] for request in requests] == ["start", "stop"]
+
+    service.handle_client_message(
+        recorder_id,
+        {
+            "type": "recording_ack",
+            "data": {"request_id": requests[-1]["request_id"], "ok": True},
+        },
+    )
+    await asyncio.wait_for(next_start, timeout=1)
+    assert [request["action"] for request in requests] == ["start", "stop", "start"]
+
+
+@pytest.mark.asyncio
+async def test_successful_land_retries_stop_when_recorder_reconnects():
+    service = AutoRecordingService()
+    actions: list[str] = []
+    recorder_id = ""
+
+    async def send(message: dict):
+        request = message["data"]
+        actions.append(request["action"])
+        service.handle_client_message(
+            recorder_id,
+            {
+                "type": "recording_ack",
+                "data": {"request_id": request["request_id"], "ok": True},
+            },
+        )
+
+    recorder_id = service.connect_recorder(send)
+    service.handle_client_message(
+        recorder_id, {"type": "recorder_status", "data": {"ready": True}}
+    )
+    await service.start_recording_for_takeoff()
+    service.disconnect_recorder(recorder_id)
+    service.stop_recording_after_successful_land()
+    assert service._stop_task is not None
+    await service._stop_task
+
+    recorder_id = service.connect_recorder(send)
+    service.handle_client_message(
+        recorder_id, {"type": "recorder_status", "data": {"ready": True}}
+    )
+    assert service._stop_task is not None
+    await service._stop_task
+    assert actions == ["start", "stop"]
+
+
+@pytest.mark.asyncio
+async def test_failed_stop_is_retried_when_same_recorder_becomes_ready():
+    service = AutoRecordingService()
+    actions: list[str] = []
+    recorder_id = ""
+
+    async def send(message: dict):
+        request = message["data"]
+        actions.append(request["action"])
+        service.handle_client_message(
+            recorder_id,
+            {
+                "type": "recording_ack",
+                "data": {
+                    "request_id": request["request_id"],
+                    "ok": actions != ["start", "stop"],
+                    "error": "Queue unavailable",
+                },
+            },
+        )
+
+    recorder_id = service.connect_recorder(send)
+    service.handle_client_message(
+        recorder_id, {"type": "recorder_status", "data": {"ready": True}}
+    )
+    await service.start_recording_for_takeoff()
+    service.stop_recording_after_successful_land()
+    assert service._stop_task is not None
+    await service._stop_task
+    assert actions == ["start", "stop"]
+
+    service.handle_client_message(
+        recorder_id, {"type": "recorder_status", "data": {"ready": True}}
+    )
+    assert service._stop_task is not None
+    await service._stop_task
+    assert actions == ["start", "stop", "stop"]
+    await service.start_recording_for_takeoff()
+    assert actions[-1] == "start"
 
 
 @pytest.mark.asyncio
@@ -291,3 +458,71 @@ def test_recording_is_stopped_if_drone_takeoff_fails(
 
     assert response.status_code == 500
     assert actions == ["start", "stop"]
+
+
+@pytest.mark.parametrize("land_fails", [False, True])
+def test_auto_recording_stops_only_after_successful_land_command(
+    test_client: TestClient, monkeypatch: pytest.MonkeyPatch, land_fails: bool
+):
+    monkeypatch.setattr(settings, "auto_record_on_takeoff", True)
+    assert test_client.post("/api/control/connect").status_code == 200
+    monkeypatch.setattr(settings, "use_mock_drone", False)
+    service: AutoRecordingService = app.state.auto_recording_service
+    manager = app.state.drone_manager
+    actions: list[str] = []
+    stopped = Event()
+    stop_request_id = ""
+    recorder_id = ""
+
+    async def send(message: dict):
+        nonlocal stop_request_id
+        request = message["data"]
+        actions.append(request["action"])
+        if request["action"] == "stop":
+            stop_request_id = request["request_id"]
+            stopped.set()
+            return
+        service.handle_client_message(
+            recorder_id,
+            {
+                "type": "recording_ack",
+                "data": {"request_id": request["request_id"], "ok": True},
+            },
+        )
+    recorder_id = service.connect_recorder(send)
+    service.handle_client_message(
+        recorder_id, {"type": "recorder_status", "data": {"ready": True}}
+    )
+    assert test_client.post("/api/control/takeoff").status_code == 200
+
+    if land_fails:
+        async def fail_land():
+            raise RuntimeError("land failed")
+
+        monkeypatch.setattr(manager, "land", fail_land)
+
+    response = test_client.post("/api/control/land")
+
+    assert response.status_code == (500 if land_fails else 200)
+    if land_fails:
+        assert actions == ["start"]
+    else:
+        assert stopped.wait(timeout=1)
+        assert actions == ["start", "stop"]
+        assert service._stop_task is not None
+        assert not service._stop_task.done()
+        assert test_client.portal is not None
+        test_client.portal.call(
+            service.handle_client_message,
+            recorder_id,
+            {
+                "type": "recording_ack",
+                "data": {"request_id": stop_request_id, "ok": True},
+            },
+        )
+
+        async def wait_for_stop():
+            assert service._stop_task is not None
+            await service._stop_task
+
+        test_client.portal.call(wait_for_stop)

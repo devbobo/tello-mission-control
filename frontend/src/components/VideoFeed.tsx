@@ -1,20 +1,22 @@
 import { Circle, Square } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   closeWebRtcPeer,
   createWebRtcOffer,
   getActiveFlight,
   getWebRtcConfiguration,
-  uploadFlightVideo,
+  startNextFlightSession,
 } from '@/lib/api';
+import { recordingQueue } from '@/lib/recordingQueue';
 import { useDroneStore } from '@/stores/droneStore';
 import type { FlightSession } from '@/types/drone';
 
 type FeedState = 'loading' | 'active' | 'error';
-type RecordingState = 'idle' | 'recording' | 'saving' | 'saved' | 'error';
+type RecordingState = 'idle' | 'recording' | 'finalizing' | 'saved' | 'error';
 
 interface ActiveRecording {
   recorder: MediaRecorder;
+  recordingId: string;
   flight: FlightSession;
   startedAt: string;
   startedAtMs: number;
@@ -70,69 +72,71 @@ export default function VideoFeed() {
   const [activeFlight, setActiveFlight] = useState<FlightSession | null>(null);
   const [recordingState, setRecordingState] = useState<RecordingState>('idle');
   const [recordingError, setRecordingError] = useState('');
+  const queue = useSyncExternalStore(recordingQueue.subscribe, recordingQueue.getSnapshot);
   const videoRef = useRef<HTMLVideoElement>(null);
   const recordingRef = useRef<ActiveRecording | null>(null);
-
-  const persistRecording = useCallback(async (recording: ActiveRecording, video: Blob) => {
-    try {
-      await uploadFlightVideo(
-        recording.flight.id,
-        video,
-        recording.startedAt,
-        recording.durationMs,
-      );
-      setActiveFlight((current) =>
-        current?.id === recording.flight.id
-          ? {
-              ...current,
-              video_available: true,
-              video_started_at: recording.startedAt,
-              video_duration_ms: recording.durationMs,
-            }
-          : current,
-      );
-      setRecordingState('saved');
-    } catch (error) {
-      setRecordingError(error instanceof Error ? error.message : 'Unable to save flight video');
-      setRecordingState('error');
-    }
-  }, []);
+  const finalizingRef = useRef(false);
 
   const stopRecording = useCallback(async (): Promise<boolean> => {
     const recording = recordingRef.current;
-    if (!recording) return true;
-    if (recording.recorder.state !== 'inactive') recording.recorder.stop();
-    recordingRef.current = null;
+    if (!recording && !recordingQueue.pendingStorage) {
+      setRecordingState('saved');
+      return true;
+    }
+    if (finalizingRef.current) return false;
+    finalizingRef.current = true;
     try {
-      const video = await recording.stopped;
-      void persistRecording(recording, video);
+      if (recording) {
+        if (recording.recorder.state !== 'inactive') recording.recorder.stop();
+        recordingRef.current = null;
+        const video = await recording.stopped;
+        await recordingQueue.enqueue({
+          flightId: recording.flight.id,
+          recordingId: recording.recordingId,
+          video,
+          startedAt: recording.startedAt,
+          durationMs: recording.durationMs,
+        });
+      } else if (recordingQueue.pendingStorage) {
+        await recordingQueue.enqueue(recordingQueue.pendingStorage);
+      }
+      setRecordingError('');
+      setRecordingState('saved');
       return true;
     } catch (error) {
       setRecordingError(error instanceof Error ? error.message : 'Unable to finish flight recording');
       setRecordingState('error');
       return false;
+    } finally {
+      finalizingRef.current = false;
     }
-  }, [persistRecording]);
+  }, []);
 
   const startRecording = useCallback(async () => {
     if (recordingRef.current) return;
-    if (recordingState === 'saving' || recordingState === 'saved') {
+    if (finalizingRef.current || recordingQueue.pendingStorage) {
       throw new Error('The flight recording cannot be started in its current state');
-    }
-    if (!activeFlight || activeFlight.video_available) {
-      throw new Error('There is no active flight available for recording');
-    }
-    const stream = videoRef.current?.srcObject;
-    if (!(stream instanceof MediaStream)) {
-      throw new Error('The live video feed is not ready yet');
-    }
-
-    const mimeType = getRecordingMimeType();
-    if (!mimeType) {
-      throw new Error('This browser does not support WebM video recording');
     }
 
     try {
+      await recordingQueue.initialize();
+      let flight = await getActiveFlight();
+      if (!flight) {
+        throw new Error('There is no active flight available for recording');
+      }
+      if (flight.video_available || recordingQueue.wasRecorded(flight.id)) {
+        flight = await startNextFlightSession(flight.id);
+      }
+      setActiveFlight(flight);
+      const stream = videoRef.current?.srcObject;
+      if (!(stream instanceof MediaStream)) {
+        throw new Error('The live video feed is not ready yet');
+      }
+
+      const mimeType = getRecordingMimeType();
+      if (!mimeType) {
+        throw new Error('This browser does not support WebM video recording');
+      }
       const recorder = new MediaRecorder(stream, { mimeType });
       const startedAtMs = Date.now();
       const chunks: Blob[] = [];
@@ -151,7 +155,10 @@ export default function VideoFeed() {
       });
       const recording: ActiveRecording = {
         recorder,
-        flight: activeFlight,
+        recordingId: Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+          byte.toString(16).padStart(2, '0'),
+        ).join(''),
+        flight,
         startedAt: new Date(startedAtMs).toISOString(),
         startedAtMs,
         durationMs: 1,
@@ -189,12 +196,12 @@ export default function VideoFeed() {
       setRecordingState('error');
       throw startError;
     }
-  }, [activeFlight, recordingState]);
+  }, []);
 
   const toggleRecording = useCallback(async () => {
-    if (recordingState === 'saving' || recordingState === 'saved') return;
-    if (recordingRef.current) {
-      setRecordingState('saving');
+    if (recordingState === 'finalizing') return;
+    if (recordingRef.current || recordingQueue.pendingStorage) {
+      setRecordingState('finalizing');
       await stopRecording();
       return;
     }
@@ -205,6 +212,10 @@ export default function VideoFeed() {
       return;
     }
   }, [recordingState, startRecording, stopRecording]);
+
+  useEffect(() => {
+    if (!previewMode) void recordingQueue.initialize().catch(() => undefined);
+  }, [previewMode]);
 
   useEffect(() => {
     if (previewMode) return;
@@ -231,10 +242,9 @@ export default function VideoFeed() {
       connectionStatus === 'connected' &&
       state === 'active' &&
       activeFlight !== null &&
-      !activeFlight.video_available &&
-      recordingState !== 'saving' &&
-      recordingState !== 'saved' &&
-      recordingState !== 'error' &&
+      queue.ready &&
+      recordingState !== 'finalizing' &&
+      !recordingQueue.pendingStorage &&
       getRecordingMimeType() !== null;
     setRecordingReady(ready);
     return () => setRecordingReady(false);
@@ -242,6 +252,7 @@ export default function VideoFeed() {
     activeFlight,
     connectionStatus,
     previewMode,
+    queue.ready,
     recordingState,
     setRecordingReady,
     state,
@@ -255,7 +266,7 @@ export default function VideoFeed() {
         return;
       }
 
-      setRecordingState('saving');
+      setRecordingState('finalizing');
       if (!(await stopRecording())) {
         throw new Error('The browser could not finish the flight recording');
       }
@@ -263,7 +274,6 @@ export default function VideoFeed() {
     return () => setRecordingRequestHandler(null);
   }, [
     previewMode,
-    recordingState,
     setRecordingRequestHandler,
     startRecording,
     stopRecording,
@@ -283,7 +293,7 @@ export default function VideoFeed() {
 
     const closeActivePeer = async () => {
       if (recordingRef.current) {
-        setRecordingState('saving');
+        setRecordingState('finalizing');
         await stopRecording();
       }
       const currentPeer = peer;
@@ -419,33 +429,57 @@ export default function VideoFeed() {
           }`}
           disabled={
             state !== 'active' ||
-            recordingState === 'saving' ||
-            (recordingState !== 'recording' && (!activeFlight || activeFlight.video_available))
+            recordingState === 'finalizing' ||
+            (recordingState !== 'recording' && !activeFlight)
           }
           onClick={() => void toggleRecording()}
           aria-label={
             recordingState === 'recording'
               ? 'Stop flight recording'
-              : recordingState === 'saving'
-                ? 'Saving flight video'
+              : recordingState === 'finalizing'
+                ? 'Preparing flight video'
+                : recordingQueue.pendingStorage
+                  ? 'Retry preparing flight video'
                 : recordingState === 'saved' || activeFlight?.video_available
-                  ? 'Flight video saved'
+                  ? 'Start next flight recording'
                   : 'Start flight recording'
           }
         >
           {recordingState === 'recording' ? <Square size={13} /> : <Circle size={13} />}
           {recordingState === 'recording'
             ? 'STOP RECORDING'
-            : recordingState === 'saving'
-              ? 'SAVING VIDEO...'
+            : recordingState === 'finalizing'
+              ? 'PREPARING VIDEO...'
+              : recordingQueue.pendingStorage
+                ? 'RETRY PREPARING VIDEO'
               : recordingState === 'saved' || activeFlight?.video_available
-                ? 'VIDEO SAVED'
+                ? 'RECORD NEXT FLIGHT'
                 : 'RECORD FLIGHT'}
         </button>
         {recordingError && (
           <p className="mt-1 max-w-64 text-[10px] text-danger" role="alert">
             {recordingError}
           </p>
+        )}
+        {queue.pending > 0 && (
+          <p className="mt-1 text-[10px] text-hud-dim" role="status">
+            Saving {queue.pending} flight {queue.pending === 1 ? 'video' : 'videos'}...
+          </p>
+        )}
+        {(queue.error || queue.failed.length > 0) && (
+          <div className="mt-1 max-w-64 text-[10px] text-danger" role="alert">
+            {queue.error ?? `${queue.failed.length} flight video(s) could not be saved: ${queue.failed[0].error}`}
+            <button
+              className="control-btn ml-2 p-1"
+              onClick={() => {
+                if (recordingQueue.pendingStorage) void stopRecording();
+                else if (queue.error) void recordingQueue.initialize().catch(() => undefined);
+                else recordingQueue.retryFailed();
+              }}
+            >
+              Retry
+            </button>
+          </div>
         )}
       </div>
 

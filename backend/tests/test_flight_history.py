@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta
 from fractions import Fraction
 from pathlib import Path
+from uuid import uuid4
 
 import av
 import numpy as np
@@ -153,6 +154,119 @@ def test_flight_video_is_transcoded_and_served_with_session(
         content=video_bytes,
     )
     assert duplicate.status_code == 409
+
+
+def test_flight_video_preserves_irregular_frame_timestamps(
+    test_client: TestClient, tmp_path: Path
+):
+    source = tmp_path / "variable-timing.webm"
+    timestamps_ms = [0, 33, 66, 100, 120, 133, 166, 200, 233, 266, 300]
+    with av.open(str(source), mode="w", format="webm") as output:
+        stream = output.add_stream("libvpx", rate=30)
+        stream.width = 320
+        stream.height = 240
+        stream.pix_fmt = "yuv420p"
+        stream.codec_context.time_base = Fraction(1, 1000)
+        for index, timestamp in enumerate(timestamps_ms):
+            image = np.full((240, 320, 3), index * 20, dtype=np.uint8)
+            frame = av.VideoFrame.from_ndarray(image, format="rgb24")
+            frame.pts = timestamp
+            frame.time_base = Fraction(1, 1000)
+            for packet in stream.encode(frame):
+                output.mux(packet)
+        for packet in stream.encode():
+            output.mux(packet)
+
+    assert test_client.post("/api/control/connect").status_code == 200
+    session = test_client.get("/api/flights/active").json()
+    response = test_client.put(
+        f"/api/flights/{session['id']}/video",
+        params={"started_at": session["started_at"], "duration_ms": 301},
+        headers={"content-type": "video/webm"},
+        content=source.read_bytes(),
+    )
+    assert response.status_code == 201
+
+    video = test_client.get(f"/api/flights/{session['id']}/video")
+    with av.open(io.BytesIO(video.content)) as playback:
+        times = [frame.time for frame in playback.decode(video=0)]
+    assert times == pytest.approx([timestamp / 1000 for timestamp in timestamps_ms], abs=0.002)
+
+
+def test_recorded_session_can_be_followed_by_another_without_reconnecting(
+    test_client: TestClient, tmp_path: Path
+):
+    assert test_client.post("/api/control/connect").status_code == 200
+    first = test_client.get("/api/flights/active").json()
+    video_bytes = _create_test_webm(tmp_path / "first-recording.webm")
+    response = test_client.put(
+        f"/api/flights/{first['id']}/video",
+        params={"started_at": first["started_at"], "duration_ms": 1000},
+        headers={"content-type": "video/webm"},
+        content=video_bytes,
+    )
+    assert response.status_code == 201
+    assert test_client.post("/api/control/takeoff").status_code == 200
+    assert test_client.post(f"/api/flights/{first['id']}/next").status_code == 409
+    assert test_client.post("/api/control/land").status_code == 200
+
+    next_session = test_client.post(f"/api/flights/{first['id']}/next")
+    assert next_session.status_code == 200
+    second = next_session.json()
+    assert second["id"] != first["id"]
+    assert second["status"] == "active"
+    assert second["video_available"] is False
+    assert test_client.get("/api/flights/active").json()["id"] == second["id"]
+    assert test_client.get(f"/api/flights/{first['id']}/video").status_code == 200
+    assert test_client.post(f"/api/flights/{first['id']}/next").status_code == 409
+    assert test_client.post("/api/control/takeoff").status_code == 200
+    assert test_client.post(f"/api/flights/{second['id']}/next").status_code == 409
+    assert test_client.post("/api/control/land").status_code == 200
+    assert test_client.put(
+        f"/api/flights/{second['id']}/video",
+        params={"started_at": second["started_at"], "duration_ms": 1000},
+        headers={"content-type": "video/webm"},
+        content=video_bytes,
+    ).status_code == 201
+    assert test_client.get(f"/api/flights/{first['id']}/video").status_code == 200
+    assert test_client.get(f"/api/flights/{second['id']}/video").status_code == 200
+
+
+def test_recording_can_be_uploaded_after_starting_next_session(
+    test_client: TestClient, tmp_path: Path
+):
+    assert test_client.post("/api/control/connect").status_code == 200
+    first = test_client.get("/api/flights/active").json()
+    assert test_client.post(f"/api/flights/{first['id']}/next").status_code == 200
+    video_bytes = _create_test_webm(tmp_path / "queued.webm")
+
+    upload = test_client.put(
+        f"/api/flights/{first['id']}/video",
+        params={"started_at": first["started_at"], "duration_ms": 1000},
+        headers={"content-type": "video/webm"},
+        content=video_bytes,
+    )
+    assert upload.status_code == 201
+    assert test_client.get(f"/api/flights/{first['id']}/video").status_code == 200
+
+
+def test_queued_video_upload_retries_are_idempotent(test_client: TestClient, tmp_path: Path):
+    assert test_client.post("/api/control/connect").status_code == 200
+    session = test_client.get("/api/flights/active").json()
+    video_bytes = _create_test_webm(tmp_path / "queued.webm")
+    recording_id = str(uuid4())
+    params = {
+        "started_at": session["started_at"],
+        "duration_ms": 1000,
+        "recording_id": recording_id,
+    }
+    url = f"/api/flights/{session['id']}/video"
+    assert test_client.put(url, params=params, headers={"content-type": "video/webm"}, content=video_bytes).status_code == 201
+    assert test_client.put(url, params=params, headers={"content-type": "video/webm"}, content=video_bytes).status_code == 201
+    params["recording_id"] = str(uuid4())
+    assert test_client.put(url, params=params, headers={"content-type": "video/webm"}, content=video_bytes).status_code == 409
+    events = test_client.get(f"/api/flights/{session['id']}/events").json()["items"]
+    assert sum(event["command"] == "recording_start" for event in events) == 1
 
 
 def test_flight_video_rejects_unknown_session_and_invalid_media(test_client: TestClient):

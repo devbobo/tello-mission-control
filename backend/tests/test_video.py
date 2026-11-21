@@ -1,10 +1,12 @@
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import settings
 from app.models.video import WebRTCIceServer
 from app.routers import video as video_router
+from app.services.drone_manager import DroneNotConnectedError
 
 
 def test_stream_start_requires_connection(test_client: TestClient):
@@ -54,6 +56,38 @@ def test_webrtc_offer_requires_connection(test_client: TestClient):
         json={"sdp": "browser-offer", "type": "offer"},
     )
     assert resp.status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "detail"),
+    [
+        (DroneNotConnectedError(), 409, "Drone is not connected"),
+        (ValueError("bad offer"), 400, "Invalid WebRTC offer: bad offer"),
+        (
+            RuntimeError("negotiation failed"),
+            500,
+            "WebRTC negotiation failed: negotiation failed",
+        ),
+    ],
+)
+def test_webrtc_offer_failures_stay_out_of_command_log(
+    test_client: TestClient, monkeypatch, caplog, error, status, detail
+):
+    dm = test_client.app.state.drone_manager
+    service = test_client.app.state.webrtc_service
+    command_failure = AsyncMock()
+    monkeypatch.setattr(dm, "log_command_failure", command_failure)
+    monkeypatch.setattr(service, "create_answer", AsyncMock(side_effect=error))
+
+    resp = test_client.post(
+        "/api/video/webrtc/offer",
+        json={"sdp": "browser-offer", "type": "offer"},
+    )
+
+    assert resp.status_code == status
+    assert resp.json()["detail"] == detail
+    command_failure.assert_not_awaited()
+    assert "WebRTC offer failed" in caplog.text
 
 
 def test_webrtc_config_returns_ice_servers(test_client: TestClient, monkeypatch):

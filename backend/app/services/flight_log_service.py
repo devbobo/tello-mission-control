@@ -32,6 +32,10 @@ class FlightVideoTooLargeError(Exception):
     pass
 
 
+class FlightSessionConflictError(Exception):
+    pass
+
+
 class FlightLogService:
     """Persists flight sessions, command results, and telemetry snapshots."""
 
@@ -133,6 +137,21 @@ class FlightLogService:
     async def get_active_session(self) -> dict[str, Any] | None:
         return await asyncio.to_thread(self._get_active_session)
 
+    async def start_next_recording_session(self, session_id: str) -> dict[str, Any]:
+        async with self._lock:
+            if self._session_id != session_id:
+                raise FlightSessionConflictError("Flight session is no longer active")
+            next_id = str(uuid.uuid4())
+            timestamp = datetime.now(timezone.utc).isoformat()
+            await asyncio.to_thread(
+                self._rollover_recorded_session, session_id, next_id, timestamp
+            )
+            self._session_id = next_id
+            session = await asyncio.to_thread(self._get_active_session)
+            if session is None:
+                raise RuntimeError("New flight session was not found")
+            return session
+
     async def list_events(
         self, session_id: str, limit: int, offset: int
     ) -> dict[str, Any] | None:
@@ -144,11 +163,18 @@ class FlightLogService:
         started_at: datetime,
         duration_ms: int,
         chunks: AsyncIterator[bytes],
+        recording_id: str | None = None,
     ) -> None:
         session = await asyncio.to_thread(self._get_session_video_metadata, session_id)
         if session is None:
             raise FlightNotFoundError(session_id)
         if session["video_path"] is not None:
+            if (
+                recording_id is not None
+                and session["video_recording_id"] == recording_id
+                and (self._video_directory / session["video_path"]).is_file()
+            ):
+                return
             raise FlightVideoAlreadyExistsError(session_id)
 
         started_at = _as_utc(started_at)
@@ -189,6 +215,7 @@ class FlightLogService:
                     transcoded_path,
                     started_at.isoformat(),
                     duration_ms,
+                    recording_id,
                 )
         finally:
             await asyncio.to_thread(temporary_path.unlink, missing_ok=True)
@@ -252,7 +279,8 @@ class FlightLogService:
                     video_path TEXT,
                     video_started_at TEXT,
                     video_duration_ms INTEGER,
-                    video_content_type TEXT
+                    video_content_type TEXT,
+                    video_recording_id TEXT
                 );
                 CREATE INDEX IF NOT EXISTS flight_sessions_started_at
                     ON flight_sessions(started_at DESC);
@@ -280,6 +308,7 @@ class FlightLogService:
                 ("video_started_at", "TEXT"),
                 ("video_duration_ms", "INTEGER"),
                 ("video_content_type", "TEXT"),
+                ("video_recording_id", "TEXT"),
             ):
                 if name not in columns:
                     connection.execute(
@@ -329,6 +358,24 @@ class FlightLogService:
             )
             self._insert_event_on_connection(
                 connection, session_id, "command", timestamp, command, params, result, error, None
+            )
+
+    def _rollover_recorded_session(
+        self, session_id: str, next_id: str, timestamp: str
+    ) -> None:
+        with self._connection() as connection:
+            result = connection.execute(
+                """
+                UPDATE flight_sessions SET status = 'completed', ended_at = ?
+                WHERE id = ? AND status = 'active'
+                """,
+                (timestamp, session_id),
+            )
+            if result.rowcount != 1:
+                raise FlightSessionConflictError("Flight session is no longer active")
+            connection.execute(
+                "INSERT INTO flight_sessions (id, started_at, status) VALUES (?, ?, 'active')",
+                (next_id, timestamp),
             )
 
     def _insert_event(
@@ -466,7 +513,7 @@ class FlightLogService:
         with self._connection() as connection:
             row = connection.execute(
                 """
-                SELECT started_at, ended_at, video_path
+                SELECT started_at, ended_at, video_path, video_recording_id
                 FROM flight_sessions
                 WHERE id = ?
                 """,
@@ -480,16 +527,23 @@ class FlightLogService:
         temporary_path: Path,
         started_at: str,
         duration_ms: int,
+        recording_id: str | None,
     ) -> None:
         stored_name = f"{uuid.uuid4().hex}.mp4"
         stored_path = self._video_directory / stored_name
         with self._connection() as connection:
             row = connection.execute(
-                "SELECT video_path FROM flight_sessions WHERE id = ?", (session_id,)
+                "SELECT video_path, video_recording_id FROM flight_sessions WHERE id = ?", (session_id,)
             ).fetchone()
             if row is None:
                 raise FlightNotFoundError(session_id)
             if row["video_path"] is not None:
+                if (
+                    recording_id is not None
+                    and row["video_recording_id"] == recording_id
+                    and (self._video_directory / row["video_path"]).is_file()
+                ):
+                    return
                 raise FlightVideoAlreadyExistsError(session_id)
 
             os.replace(temporary_path, stored_path)
@@ -498,10 +552,10 @@ class FlightLogService:
                     """
                     UPDATE flight_sessions
                     SET video_path = ?, video_started_at = ?, video_duration_ms = ?,
-                        video_content_type = ?
+                        video_content_type = ?, video_recording_id = ?
                     WHERE id = ?
                     """,
-                    (stored_name, started_at, duration_ms, "video/mp4", session_id),
+                    (stored_name, started_at, duration_ms, "video/mp4", recording_id, session_id),
                 )
                 self._insert_recording_events_on_connection(
                     connection, session_id, started_at, duration_ms
@@ -608,7 +662,7 @@ def _transcode_webm_to_mp4(source_path: Path, destination_path: Path) -> None:
         if frame_rate is None or frame_rate <= 0:
             frame_rate = settings.video_fps
         frame_rate = Fraction(frame_rate)
-        frame_time_base = Fraction(1, 1) / frame_rate
+        frame_time_base = Fraction(1, 90_000)
 
         with av.open(
             str(destination_path),
@@ -621,15 +675,21 @@ def _transcode_webm_to_mp4(source_path: Path, destination_path: Path) -> None:
             output_stream.height = source_stream.height
             output_stream.pix_fmt = "yuv420p"
             output_stream.bit_rate = 2_000_000
+            output_stream.codec_context.time_base = frame_time_base
 
             frame_count = 0
+            previous_pts: int | None = None
             for frame in source.decode(source_stream):
-                timestamp = frame.time
-                frame.pts = (
-                    round(timestamp / float(frame_time_base))
-                    if timestamp is not None
-                    else frame_count
-                )
+                if frame.pts is not None and frame.time_base is not None:
+                    pts = round(frame.pts * frame.time_base / frame_time_base)
+                elif previous_pts is None:
+                    pts = 0
+                else:
+                    pts = previous_pts + round(1 / frame_rate / frame_time_base)
+                if previous_pts is not None:
+                    pts = max(pts, previous_pts + 1)
+                previous_pts = pts
+                frame.pts = pts
                 frame.time_base = frame_time_base
                 frame = frame.reformat(format="yuv420p")
                 for packet in output_stream.encode(frame):

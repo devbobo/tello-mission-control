@@ -6,6 +6,7 @@ from app.config import settings
 from app.models.commands import (
     CommandResponse,
     ConnectResponse,
+    FlipRequest,
     MoveRequest,
     RcControlRequest,
     RotateRequest,
@@ -106,6 +107,8 @@ async def land(request: Request):
     command_timestamp = datetime.now(timezone.utc)
     try:
         result = await dm.land()
+        if result["ok"]:
+            request.app.state.auto_recording_service.stop_recording_after_successful_land()
         return CommandResponse(**result)
     except DroneNotConnectedError as e:
         await _log_failure(request, "land", {}, e, command_timestamp)
@@ -197,6 +200,25 @@ async def rotate(request: Request, body: RotateRequest):
             command_timestamp,
         )
         raise HTTPException(status_code=500, detail=f"Rotate failed: {e}")
+
+
+@router.post("/flip", response_model=CommandResponse)
+async def flip(request: Request, body: FlipRequest):
+    dm = _get_dm(request)
+    params = {"direction": body.direction.value}
+    command_timestamp = datetime.now(timezone.utc)
+    try:
+        result = await dm.flip(body.direction)
+        return CommandResponse(**result)
+    except DroneNotConnectedError as e:
+        await _log_failure(request, "flip", params, e, command_timestamp)
+        raise HTTPException(status_code=409, detail="Drone is not connected")
+    except DroneNotFlyingError as e:
+        await _log_failure(request, "flip", params, e, command_timestamp)
+        raise HTTPException(status_code=409, detail="Drone is not flying")
+    except Exception as e:
+        await _log_failure(request, "flip", params, e, command_timestamp)
+        raise HTTPException(status_code=500, detail=f"Flip failed: {e}")
 
 
 @router.post("/rc", response_model=CommandResponse)

@@ -20,10 +20,10 @@ export default function EmergencyButton({ replay }: EmergencyButtonProps) {
     <div className="fixed bottom-3 right-3 sm:bottom-6 sm:right-6 z-[3]">
       <button
         type="button"
-        className={`emergency-btn ${
+        className={`emergency-btn ${replay ? 'pointer-events-none !animate-none' : ''} ${
           replay?.highlighted
             ? '!opacity-100 ring-2 ring-danger shadow-[0_0_16px_rgba(255,59,48,0.65)]'
-            : ''
+            : replay ? 'opacity-25' : ''
         }`}
         disabled={replay !== undefined}
         data-replay-active={replay?.highlighted || undefined}

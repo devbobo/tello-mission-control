@@ -17,6 +17,13 @@ class RotateDirection(str, Enum):
     ccw = "ccw"
 
 
+class FlipDirection(str, Enum):
+    forward = "forward"
+    back = "back"
+    left = "left"
+    right = "right"
+
+
 class MoveRequest(BaseModel):
     direction: MoveDirection
     distance_cm: int = Field(..., ge=20, le=500, description="Distance in cm (20-500)")
@@ -25,6 +32,10 @@ class MoveRequest(BaseModel):
 class RotateRequest(BaseModel):
     direction: RotateDirection
     angle_deg: int = Field(..., ge=1, le=360, description="Angle in degrees (1-360)")
+
+
+class FlipRequest(BaseModel):
+    direction: FlipDirection
 
 
 class RcControlRequest(BaseModel):

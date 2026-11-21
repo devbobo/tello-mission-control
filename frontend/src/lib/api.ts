@@ -135,6 +135,17 @@ export function getActiveFlight(): Promise<FlightSession | null> {
   return get<FlightSession | null>('/api/flights/active');
 }
 
+export async function startNextFlightSession(flightId: string): Promise<FlightSession> {
+  const res = await fetch(`/api/flights/${encodeURIComponent(flightId)}/next`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { detail?: string } | null;
+    throw new Error(body?.detail ?? `Unable to start next flight: HTTP ${res.status}`);
+  }
+  return res.json() as Promise<FlightSession>;
+}
+
 export function getFlightEvents(
   flightId: string,
   limit = 100,
@@ -172,11 +183,13 @@ export async function uploadFlightVideo(
   video: Blob,
   startedAt: string,
   durationMs: number,
+  recordingId?: string,
 ): Promise<void> {
   const params = new URLSearchParams({
     started_at: startedAt,
     duration_ms: String(durationMs),
   });
+  if (recordingId) params.set('recording_id', recordingId);
   let response: Response;
   try {
     response = await fetch(

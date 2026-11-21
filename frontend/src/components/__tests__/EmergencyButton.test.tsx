@@ -37,5 +37,6 @@ describe('EmergencyButton', () => {
     render(<EmergencyButton />);
     const btn = screen.getByRole('button', { name: 'Emergency Stop' });
     expect(btn).not.toBeDisabled();
+    expect(btn).not.toHaveClass('opacity-25', '!animate-none');
   });
 });
