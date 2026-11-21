@@ -182,7 +182,7 @@ All environment variables are prefixed with `TELLO_`. See `.env.template` for th
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TELLO_USE_MOCK_DRONE` | `false` | Use fake drone for development |
-| `TELLO_TELLO_HOST` | `192.168.10.1` | Drone IP address |
+| `TELLO_HOST` | `192.168.10.1` | Drone IP address (`TELLO_TELLO_HOST` remains supported as a legacy name; `TELLO_HOST` takes precedence) |
 | `TELLO_API_PORT` | `8000` | Backend server port |
 | `TELLO_FRONTEND_PORT` | `3000` | Frontend server port (Docker) |
 | `TELLO_MCP_API_URL` | `http://127.0.0.1:8000` | Backend URL used by the local MCP server |

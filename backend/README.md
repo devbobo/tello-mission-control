@@ -173,7 +173,7 @@ All prefixed with `TELLO_`:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TELLO_USE_MOCK_DRONE` | `false` | Use fake drone for development |
-| `TELLO_TELLO_HOST` | `192.168.10.1` | Drone IP address |
+| `TELLO_HOST` | `192.168.10.1` | Drone IP address (`TELLO_TELLO_HOST` remains supported as a legacy name; `TELLO_HOST` takes precedence) |
 | `TELLO_API_PORT` | `8000` | Server port |
 | `TELLO_TELEMETRY_POLL_HZ` | `4.0` | Telemetry polling frequency |
 | `TELLO_CORS_ORIGINS` | `["http://localhost:3000","http://localhost:5173"]` | Allowed CORS origins |

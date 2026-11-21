@@ -1,6 +1,7 @@
 from pathlib import Path
+from typing import Any
 
-from pydantic import Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings
 
 from app.models.video import WebRTCIceServer
@@ -8,7 +9,10 @@ from app.models.video import WebRTCIceServer
 
 class Settings(BaseSettings):
     # Drone connection
-    tello_host: str = "192.168.10.1"
+    tello_host: str = Field(
+        default="192.168.10.1",
+        validation_alias=AliasChoices("TELLO_HOST", "TELLO_TELLO_HOST"),
+    )
     tello_retry_count: int = 3
 
     # Server
@@ -41,10 +45,18 @@ class Settings(BaseSettings):
     # Mock mode (for development/testing without a physical drone)
     use_mock_drone: bool = False
 
+    @model_validator(mode="before")
+    @classmethod
+    def prefer_explicit_drone_host(cls, values: Any) -> Any:
+        if isinstance(values, dict) and "tello_host" in values:
+            values["TELLO_HOST"] = values.pop("tello_host")
+        return values
+
     model_config = {
         "env_prefix": "TELLO_",
         "env_file": Path(__file__).resolve().parents[2] / ".env",
         "extra": "ignore",
+        "populate_by_name": True,
     }
 
 
